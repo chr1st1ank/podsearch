@@ -16,7 +16,18 @@ def imports():
     from podsearch.core import index
     from podsearch.core.paths import CATALOG_DB, CORPUS_DB, RSS_DIR, VECTORS_PATH
 
-    return CATALOG_DB, CORPUS_DB, RSS_DIR, VECTORS_PATH, index, mo, np, pl, random, sqlite3
+    return (
+        CATALOG_DB,
+        CORPUS_DB,
+        RSS_DIR,
+        VECTORS_PATH,
+        index,
+        mo,
+        np,
+        pl,
+        random,
+        sqlite3,
+    )
 
 
 @app.cell
@@ -67,28 +78,33 @@ def helpers(pl):
 
 
 @app.cell
-def catalog(CATALOG_DB, mo, n, pl, rng, sqlite3, sql_sample):
+def catalog(CATALOG_DB, mo, pl, sqlite3):
     if not CATALOG_DB.exists():
         _out = mo.md("`data/podcastindex_feeds.db` not found — run `podsearch-catalog`")
+        df = pl.DataFrame()
     else:
         _conn = sqlite3.connect(f"file:{CATALOG_DB}?mode=ro", uri=True)
-        _total, _df = sql_sample(
+        df = pl.read_database(
+            "SELECT id, title, url, language, episodeCount, lastUpdate,"
+            " popularityScore FROM podcasts",
             _conn,
-            "podcasts",
-            "id, title, url, language, episodeCount, lastUpdate, popularityScore",
-            n.value,
-            rng,
         )
         _conn.close()
         _out = mo.vstack(
             [
-                mo.md(f"## catalog — {_total:,} feeds"),
-                _df.with_columns(
+                mo.md(f"## catalog — {len(df)} feeds"),
+                df.with_columns(
                     pl.from_epoch("lastUpdate").dt.strftime("%Y-%m-%d").alias("updated")
                 ).drop("lastUpdate"),
             ]
         )
     _out
+    return (df,)
+
+
+@app.cell
+def _(df, pl):
+    df.group_by(pl.col("language")).len().sort(pl.col("len"), descending=True).head(10)
     return
 
 
@@ -120,7 +136,7 @@ def rss(RSS_DIR, mo, n, pl, rng, seed_int):
 
 
 @app.cell
-def corpus(CORPUS_DB, mo, n, pl, rng, shorten, sqlite3, sql_sample):
+def corpus(CORPUS_DB, mo, n, pl, rng, shorten, sql_sample, sqlite3):
     if not CORPUS_DB.exists():
         _out = mo.md("`data/corpus.db` not found — run `podsearch-ingest`")
     else:

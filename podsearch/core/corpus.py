@@ -68,6 +68,9 @@ CREATE TABLE IF NOT EXISTS meta(
     value TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_episode ON chunks(episode_id);
+
+-- TODO: Following index is crucial for query performance
+CREATE INDEX IF NOT EXISTS idx_chunks_vector_row ON chunks(vector_row);
 """
 
 
