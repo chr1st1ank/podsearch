@@ -12,7 +12,7 @@ QUERIES_PATH = Path(__file__).resolve().parent / "queries.txt"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="pepsearch-load")
+    parser = argparse.ArgumentParser(prog="podsearch-load")
     parser.add_argument("--url", default="http://127.0.0.1:8000/search")
     parser.add_argument("--duration", type=float, default=30)
     parser.add_argument("--concurrency", type=int, default=4)

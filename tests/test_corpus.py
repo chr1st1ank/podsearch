@@ -1,19 +1,18 @@
-"""Tests for pepsearch.core.corpus."""
+"""Tests for podsearch.core.corpus."""
 
-from pepsearch.core import corpus
-
-
-def test_clean_strips_rst_roles() -> None:
-    text = "PEP 8\nTitle: Test\n\nAbstract:\n  See :pep:`8` and ``inline code``.\n"
-    cleaned = corpus.clean(text)
-    assert "PEP 8" in cleaned
-    assert ":pep:" not in cleaned
-    assert "inline code" in cleaned
+from podsearch.core import corpus
 
 
-def test_clean_strips_directives() -> None:
-    text = "Intro.\n\n.. code-block:: python\n\n    x = 1\n"
-    assert "code-block" not in corpus.clean(text)
+def test_strip_html_removes_tags() -> None:
+    assert corpus.strip_html("<p>Hello <b>world</b></p>") == "Hello world"
+
+
+def test_strip_html_unescapes_entities() -> None:
+    assert corpus.strip_html("fish &amp; chips &lt;3") == "fish & chips <3"
+
+
+def test_strip_html_collapses_whitespace() -> None:
+    assert corpus.strip_html("a\n\n  b\t\tc") == "a b c"
 
 
 def test_chunk_word_windows() -> None:

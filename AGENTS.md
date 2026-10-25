@@ -1,4 +1,4 @@
-# Handoff: Tachyon profiling demo ("pepsearch")
+# Handoff: Tachyon profiling demo ("podsearch")
 
 ## Goal
 
@@ -10,36 +10,48 @@ between Phase 2 (research, mostly done) and Phase 3 (storyline). Drafts live in 
 ## User decisions so far
 
 - Example = hook, not an optimization exercise: **only ONE improvement round**.
-- Example: "Ask the PEPs" mini-RAG — semantic search over the PEPs with **local** model2vec
-  embeddings (`minishlab/potion-base-8M`, 256-dim). No network/LLM calls.
+- Example: podcast-episode semantic search over real RSS data with **local** model2vec
+  embeddings (`minishlab/potion-base-8M`, 256-dim). No LLM calls. Replaced the earlier
+  "Ask the PEPs" idea — that corpus was too small to produce a real performance problem.
+- Full-size corpus is the point: hundreds of thousands of episodes so the naive search
+  loop is genuinely slow (target ~15-25 s/query vs ~0.3 s at the old 12.6k-chunk scale).
 - cProfile mentioned but not detailed; py-spy as alternative; memory profiling only touched
   (link user's 2022 posts: `2022-09-04-locating-memory-leaks-in-services-part1/2.md`).
-- Work stays inside `~/code/blog/drafts/profiling-demo/`.
+- Work lives in `~/code/blog-assets/code/profiling-demo/` (copied out of drafts/).
 
-## What exists (all verified working on Python 3.15.0)
+## Pipeline (independent CLI stages, all under gitignored data/)
 
-`~/code/blog/drafts/profiling-demo/` — flat-layout uv/hatchling project (`pepsearch/` at root,
-installed editable; **no PYTHONPATH needed**). Deps: model2vec, numpy, fastapi, uvicorn, httpx.
-Tooling: `task check` = ruff + ty (all rules error) + pytest; scripts `pepsearch`,
-`pepsearch-index`, `pepsearch-serve`, `pepsearch-load` (`-m` form still works, e.g.
-`python -m pepsearch.cli bench`, `python -m pepsearch.api`).
+`podsearch-catalog` — download+extract the Podcast Index SQLite dump to
+`data/podcastindex_feeds.db` (~5 GB; 4.7M feeds; **feed metadata only**, no episode content).
+`podsearch-fetch-rss` — select feeds (`--feeds`, `--lang` default en+de, `--min-episodes`,
+`--order recent|episodes|popularity`) → fetch RSS concurrently → append `data/rss/part-*.parquet`
+(raw body + fetch_date + all catalog columns). Idempotent: refetches only missing feeds or
+feeds whose catalog `lastUpdate` is newer than `fetch_date`.
+`podsearch-ingest` — feedparser on stored parts → `data/corpus.db` episodes table
+(incremental via `ingested_parts`; `--max-per-feed` 300 caps mega-feeds).
+`podsearch-index` — episodes → chunks (≤3/episode) → batched encode → `data/vectors.f32`
+raw float32 + `chunks.vector_row` alignment; `meta` table holds dim/n.
 
-- `pepsearch/core/corpus.py` — load 745 PEPs from `data/peps-main`, `clean()` RST, `chunk()`
-- `pepsearch/core/index.py` — `search` (naive pure-Python cosine loop = hot spot), `search_numpy`
-  (cached normalized float32 matrix, ~100x faster), JSON index `data/index.json` (12,588 chunks, 84 MB)
-- `pepsearch/indexing.py` — indexing entrypoint; `pepsearch ingest` delegates to it
-- `pepsearch/api.py` — FastAPI `/search` (sync), `/search-async` (blocks event loop), `/health`;
-  `uv run pepsearch-serve`
-- `pepsearch/cli.py` — `ingest` / `query` / `bench` (`--impl naive|numpy`, `--repeat`)
-- `pepsearch/load.py` — threaded load generator
-- `pepsearch/queries.txt` (20), `README.md` (full command list), `tests/`,
-  `results/flame-bench-naive.html`
+Then `podsearch query|bench` (`--impl naive|numpy`), `podsearch-serve` (:8000),
+`podsearch-load`. `podsearch bench --queries` defaults to 5 — naive is seconds-to-tens-of-
+seconds per query at scale.
 
-## Verified numbers
+## What exists (verified on Python 3.15.0)
 
-- ingest 17 s; naive ~0.32 s/query; numpy ~0.003 s/query; query "context manager" → PEP 343 (good)
-- Tachyon `run` + `--flamegraph` works; flamegraph shows `_cosine` line. 20,809 samples in 20.8 s
-  but **"Error rate: 25.93"** — worth investigating (rate? 3.15.0 bug?)
+- flat-layout uv/hatchling project (`podsearch/` at root, editable install). Deps: model2vec,
+  fastapi, uvicorn, httpx, feedparser, pyarrow. `task check` = ruff + ty (all error) + pytest.
+- `podsearch/core/{paths,catalog,fetch,corpus,index}.py`, `podsearch/{cli,ingest,indexing,api,load}.py`
+- Index storage is scale-shaped: `vectors.f32` np.memmap + sqlite hydration of top-k hits
+  (no `list[list[float]]`, no JSON index — would be GBs at this scale).
+- Verified: catalog idempotent skip; fetch idempotent (`pending 0` on re-run); ingest
+  incremental (0 dupes); smoke run of 20 feeds → 3,512 episodes → 5,660 chunks → 6 MB
+  vectors; naive and numpy return identical hits; numpy ~0.01 s/query at that size.
+
+## Verified numbers (from the old PEP corpus — refresh after full ingest)
+
+- Old scale: 12,588 chunks; naive ~0.32 s/query; numpy ~0.003 s/query; ingest 17 s.
+- Tachyon `run` + `--flamegraph` works; flamegraph shows `_cosine` line. 20,809 samples in
+  20.8 s but **"Error rate: 25.93"** — worth investigating (rate? 3.15.0 bug?)
 - `attach`/`dump` **blocked**: `ptrace_scope=1`. Needs user-run
   `echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope` (restore to 1 after)
 - Tachyon CLI matches docs: `run|attach|dump|replay`, `--mode {wall,cpu,gil,exception}`,
@@ -50,7 +62,7 @@ Tooling: `task check` = ruff + ty (all rules error) + pytest; scripts `pepsearch
 `~/code/blog/drafts/phase2-profiling-python-research.md` — sources, flags, caveats (sampling =
 estimates, not for <1 s runs/exact call counts/benchmarks; same-minor-version requirement; cProfile
 → `profiling.tracing`, `profile` removed in 3.17). Detailed execution plan:
-`~/code/blog/drafts/profiling-demo-spike-plan.md` (paths in it are partially outdated — user edited
+`~/code/blog/drafts/profiling-demo-spike-plan.md` (paths partially outdated — user edited
 to point into drafts/).
 
 ## Next steps
@@ -59,11 +71,16 @@ to point into drafts/).
    server under load), `--native`, `--opcodes`, `--async-aware` on `/search-async`,
    `--diff-flamegraph` for before/after, cProfile/py-spy overhead comparison, tracemalloc/memray
    check, report to `~/code/blog/drafts/phase2b-profiling-spike-results.md` (per plan §4–10).
-2. Phase 3: storyline + headline options (read `references/writing-guide.md` in the blog-writing
+2. Refresh README/AGENTS numbers once the full fetch+ingest+index has run at scale.
+3. Phase 3: storyline + headline options (read `references/writing-guide.md` in the blog-writing
    skill dir); save to `drafts/phase3-*.md`, confirm with user before drafting.
 
 ## Cautions
 
-- Only ~2 GB RAM free — one heavy process at a time.
 - Never run `sudo`; if attach is blocked, ask user to set ptrace_scope.
 - Keep code "naturally naive" — no `sleep()`/fake load.
+- Fetch politeness: bounded concurrency, timeouts, UA header; don't re-hammer dead feeds
+  (idempotency in the parquet store handles this; failures are not stored, so a re-run
+  retries them — intentional for transient errors).
+- A copied `.venv` once had stale script shebangs pointing at the old drafts env;
+  `uv sync --reinstall` fixes them.

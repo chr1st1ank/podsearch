@@ -1,11 +1,11 @@
-"""FastAPI endpoint for the PEP search - attach-profiling target."""
+"""FastAPI endpoint for the podcast search - attach-profiling target."""
 
 import uvicorn
 from fastapi import FastAPI
 
-from pepsearch.core import index
+from podsearch.core import index
 
-app = FastAPI(title="pepsearch")
+app = FastAPI(title="podsearch")
 
 _index: index.Index | None = None
 _model: "index.StaticModel | None" = None  # noqa: UP037 - StaticModel is a TYPE_CHECKING import

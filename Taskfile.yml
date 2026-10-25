@@ -24,25 +24,40 @@ tasks:
       - task: typecheck
       - task: test
 
-  ingest:
-    desc: Build the search index from data/peps-main
+  catalog:
+    desc: Download the Podcast Index feed catalog (idempotent)
     cmds:
-      - uv run pepsearch ingest
+      - uv run podsearch-catalog {{.CLI_ARGS}}
+
+  fetch:
+    desc: Fetch RSS feeds into data/rss/*.parquet (idempotent)
+    cmds:
+      - uv run podsearch-fetch-rss {{.CLI_ARGS}}
+
+  ingest:
+    desc: Parse stored RSS into the episodes corpus (incremental)
+    cmds:
+      - uv run podsearch-ingest {{.CLI_ARGS}}
+
+  index:
+    desc: Build the embedding index from the episodes corpus
+    cmds:
+      - uv run podsearch-index {{.CLI_ARGS}}
 
   bench:
-    desc: Run the naive search benchmark (profiling target)
+    desc: Run the search benchmark (profiling target)
     cmds:
-      - uv run pepsearch bench {{.CLI_ARGS}}
+      - uv run podsearch bench {{.CLI_ARGS}}
 
   serve:
     desc: Run the FastAPI service on :8000 (attach target)
     cmds:
-      - uv run pepsearch-serve
+      - uv run podsearch-serve
 
   load:
     desc: Generate load against the service
     cmds:
-      - uv run pepsearch-load {{.CLI_ARGS}}
+      - uv run podsearch-load {{.CLI_ARGS}}
 
   update-dependencies:
     desc: Upgrade locked dependencies and hook revisions (7-day cooldown)

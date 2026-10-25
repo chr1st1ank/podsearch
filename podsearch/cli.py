@@ -1,21 +1,16 @@
-"""pepsearch CLI: ingest / query / bench."""
+"""podsearch CLI: query / bench."""
 
 import argparse
 import time
 from pathlib import Path
 
-from pepsearch import indexing
-from pepsearch.core import index
+from podsearch.core import index
 
 QUERIES_PATH = Path(__file__).resolve().parent / "queries.txt"
 
 
 def _fmt(h: index.Hit) -> str:
-    return f"  {h.score:.4f}  PEP {h.pep:>4}  {h.title}"
-
-
-def cmd_ingest(_args) -> None:
-    indexing.main()
+    return f"  {h.score:.4f}  {h.podcast} — {h.episode}"
 
 
 def _search(args):
@@ -44,17 +39,15 @@ def cmd_bench(args) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="pepsearch")
+    parser = argparse.ArgumentParser(prog="podsearch")
     sub = parser.add_subparsers(required=True)
-    p_ing = sub.add_parser("ingest")
-    p_ing.set_defaults(func=cmd_ingest)
     p_q = sub.add_parser("query")
     p_q.add_argument("q")
     p_q.add_argument("-k", type=int, default=5)
     p_q.add_argument("--impl", choices=["naive", "numpy"], default="naive")
     p_q.set_defaults(func=cmd_query)
     p_b = sub.add_parser("bench")
-    p_b.add_argument("--queries", type=int, default=20)
+    p_b.add_argument("--queries", type=int, default=5)
     p_b.add_argument("--repeat", type=int, default=1)
     p_b.add_argument("-k", type=int, default=5)
     p_b.add_argument("--impl", choices=["naive", "numpy"], default="naive")
