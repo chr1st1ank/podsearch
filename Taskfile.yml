@@ -1,0 +1,53 @@
+version: "3"
+
+tasks:
+  test:
+    desc: Run tests with coverage
+    cmds:
+      - uv run pytest --cov --cov-report=term-missing
+
+  lint:
+    desc: Lint and format
+    cmds:
+      - uv run ruff check --fix .
+      - uv run ruff format .
+
+  typecheck:
+    desc: Type-check the project
+    cmds:
+      - uv run ty check
+
+  check:
+    desc: Lint + typecheck + test
+    cmds:
+      - task: lint
+      - task: typecheck
+      - task: test
+
+  ingest:
+    desc: Build the search index from data/peps-main
+    cmds:
+      - uv run pepsearch ingest
+
+  bench:
+    desc: Run the naive search benchmark (profiling target)
+    cmds:
+      - uv run pepsearch bench {{.CLI_ARGS}}
+
+  serve:
+    desc: Run the FastAPI service on :8000 (attach target)
+    cmds:
+      - uv run pepsearch-serve
+
+  load:
+    desc: Generate load against the service
+    cmds:
+      - uv run pepsearch-load {{.CLI_ARGS}}
+
+  update-dependencies:
+    desc: Upgrade locked dependencies and hook revisions (7-day cooldown)
+    cmds:
+      - uv lock --upgrade
+      - uv sync
+      - prek update
+      - task: check

@@ -1,0 +1,4 @@
+[tools]
+uv = "latest"
+task = "latest"
+prek = "latest"

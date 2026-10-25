@@ -1,0 +1,20 @@
+how does the GIL work
+why was the walrus operator added
+how do type hints work
+what is a context manager
+how do f-strings work
+how to package a python project
+what is the match statement
+why was the print statement removed
+how are decorators specified
+what is async await
+how does pattern matching work
+how should python code be formatted
+what is the zen of python
+how to deprecate a feature
+how do metaclasses work
+what are positional only parameters
+how does exception chaining work
+what is a generator
+how do imports work
+when was dict ordering guaranteed
