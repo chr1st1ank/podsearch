@@ -144,10 +144,13 @@ def search_numpy(index: Index, model, query: str, k: int = 5) -> list[Hit]:
     matrix = index._norm
     if matrix is None:
         m = index.vectors
-        matrix = m / np.linalg.norm(m, axis=1, keepdims=True)
+        norms = np.linalg.norm(m, axis=1, keepdims=True)
+        matrix = np.divide(m, norms, out=np.zeros(m.shape, dtype=np.float32), where=norms > 0)
         index._norm = matrix
     q = model.encode([query])[0].astype(np.float32)
-    q /= np.linalg.norm(q)
+    nq = np.linalg.norm(q)
+    if nq:
+        q /= nq
     scores = matrix @ q
     k = min(k, len(scores))
     top = np.argpartition(scores, -k)[-k:]

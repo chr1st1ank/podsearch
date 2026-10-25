@@ -58,3 +58,33 @@ def test_build_and_search_roundtrip(tmp_path) -> None:
     assert len(hits) == 1
     assert hits[0].episode in {"Episode one", "Episode two"}
     idx.conn.close()
+
+
+class ZeroVecModel:
+    """Zero vector for texts containing 'zword' - simulates all-OOV chunks."""
+
+    def encode(self, texts: list[str]) -> np.ndarray:
+        return np.asarray(
+            [[0.0, 0.0] if "zword" in t else [1.0, 0.0] for t in texts],
+            dtype=np.float32,
+        )
+
+
+def test_search_numpy_zero_norm_rows(tmp_path) -> None:
+    db = tmp_path / "corpus.db"
+    vectors = tmp_path / "vectors.f32"
+    conn = _tiny_corpus(db)
+    conn.execute(
+        "INSERT INTO episodes(feed_url, guid, podcast, title, link, pubdate, text)"
+        " VALUES ('u2', 'g3', 'Pod C', 'Episode three', 'l3', 0, 'zword')"
+    )
+    conn.commit()
+    index.build_index(conn, ZeroVecModel(), vectors)
+    conn.close()
+
+    idx = index.load(vectors, db)
+    hits = index.search_numpy(idx, ZeroVecModel(), "q", k=3)
+    assert all(h.score == h.score for h in hits)  # no NaN scores
+    assert hits[-1].podcast == "Pod C"
+    assert hits[-1].score == 0.0
+    idx.conn.close()
