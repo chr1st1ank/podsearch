@@ -82,30 +82,40 @@ The `-m` form also works (`uv run python -m podsearch.cli bench`,
 
 ## Profiling with Tachyon (Python 3.15, `profiling.sampling`)
 
+`run` takes a script path or `-m module` — it does not search `PATH`, so console
+scripts like `podsearch-ingest` won't resolve; use the `-m` form (the venv script
+path `.venv/bin/podsearch-ingest` also works). Add `-d SECONDS` to cap the run.
+
+The stages are idempotent, so the examples pass scratch outputs to force real
+work without clobbering the actual stores: `--db data/corpus-prof.db` (ingest),
+`--rss-dir data/rss-prof` (fetch), `--vectors data/vectors-prof.f32` (index).
+
 ```bash
-# run and profile a module — text table to stdout
-uv run python -m profiling.sampling run -m podsearch.cli bench --queries 2
+# ingest: feedparser is CPU-bound — the classic flamegraph target
+uv run python -m profiling.sampling run -m podsearch.ingest --db data/corpus-prof.db
+uv run python -m profiling.sampling run --flamegraph -o results/ingest.html -m podsearch.ingest --db data/corpus-prof.db
+uv run python -m profiling.sampling run --heatmap    -o results/ingest-heat -m podsearch.ingest --db data/corpus-prof.db
+uv run python -m profiling.sampling run --collapsed  -o results/ingest.txt  -m podsearch.ingest --db data/corpus-prof.db
+uv run python -m profiling.sampling run -r 10khz --flamegraph -o results/ingest-10khz.html -m podsearch.ingest --db data/corpus-prof.db
+uv run python -m profiling.sampling run --opcodes --flamegraph -o results/ingest-opcodes.html -m podsearch.ingest --db data/corpus-prof.db
+uv run python -m profiling.sampling run --mode=cpu       -m podsearch.ingest --db data/corpus-prof.db
+uv run python -m profiling.sampling run --mode=exception -m podsearch.ingest --db data/corpus-prof.db
 
-# flamegraph / heatmap / collapsed
-uv run python -m profiling.sampling run --flamegraph -o results/flame.html  -m podsearch.cli bench --queries 2
-uv run python -m profiling.sampling run --heatmap    -o results/heat       -m podsearch.cli bench --queries 2
-uv run python -m profiling.sampling run --collapsed  -o results/stacks.txt -m podsearch.cli bench --queries 2
+# fetch-rss: 32 threads waiting on the network — wall vs cpu diverge,
+# gil shows the threads aren't GIL-bound
+uv run python -m profiling.sampling run --mode=wall -m podsearch.core.fetch --rss-dir data/rss-prof --feeds 500
+uv run python -m profiling.sampling run --mode=cpu  -m podsearch.core.fetch --rss-dir data/rss-prof --feeds 500
+uv run python -m profiling.sampling run --mode=gil  -m podsearch.core.fetch --rss-dir data/rss-prof --feeds 500
 
-# faster rate, native frames, opcodes, modes
-uv run python -m profiling.sampling run -r 10khz --flamegraph -o results/flame-10khz.html -m podsearch.cli bench --queries 2
-uv run python -m profiling.sampling run --native --flamegraph -o results/flame-native.html -m podsearch.cli bench --queries 2
-uv run python -m profiling.sampling run --opcodes --flamegraph -o results/flame-opcodes.html -m podsearch.cli bench --queries 2
-uv run python -m profiling.sampling run --mode=cpu  -m podsearch.cli bench --queries 2
-uv run python -m profiling.sampling run --mode=gil  -m podsearch.cli bench --queries 2
-uv run python -m profiling.sampling run --mode=exception -m podsearch.cli bench --queries 2
+# index: model2vec encode — native frames under the Python stack
+uv run python -m profiling.sampling run --native --flamegraph -o results/index-native.html -m podsearch.indexing --vectors data/vectors-prof.f32
+
+# query: a single naive search — "why is this slow?"
+uv run python -m profiling.sampling run --flamegraph -o results/query.html -m podsearch.cli query "startup fundraising advice"
 
 # record binary, replay to another format
-uv run python -m profiling.sampling run --binary -o results/naive.bin -m podsearch.cli bench --queries 2
-uv run python -m profiling.sampling run --binary -o results/numpy.bin -m podsearch.cli bench --impl numpy --repeat 100
-uv run python -m profiling.sampling replay --flamegraph -o results/numpy.html results/numpy.bin
-
-# differential flamegraph: baseline first
-uv run python -m profiling.sampling run --diff-flamegraph results/naive.bin -o results/diff.html -m podsearch.cli bench --impl numpy --repeat 100
+uv run python -m profiling.sampling run --binary -o results/ingest.bin -m podsearch.ingest --db data/corpus-prof.db
+uv run python -m profiling.sampling replay --flamegraph -o results/ingest-replay.html results/ingest.bin
 ```
 
 ## Attach to the running server
@@ -133,11 +143,11 @@ uv run python -m profiling.sampling attach --async-aware -d 20 $PID # with load 
 
 ```bash
 # deterministic profiler (formerly cProfile)
-uv run python -m profiling.tracing -o results/trace.pstats -m podsearch.cli bench --queries 2
-uv run python -m cProfile -s cumtime -m podsearch.cli bench --queries 2 | head -30
+uv run python -m profiling.tracing -o results/trace.pstats -m podsearch.ingest --db data/corpus-prof.db
+uv run python -m cProfile -s cumtime -m podsearch.ingest --db data/corpus-prof.db | head -30
 
 # py-spy (third-party; also attach-capable)
-uvx py-spy record -o results/pyspy.svg -- uv run python -m podsearch.cli bench --queries 2
+uvx py-spy record -o results/pyspy.svg -- uv run python -m podsearch.ingest --db data/corpus-prof.db
 uvx py-spy top --pid $PID
 ```
 

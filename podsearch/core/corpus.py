@@ -95,7 +95,8 @@ def ingest_parts(
         parts = [p for p in sorted(rss_dir.glob("part-*.parquet")) if p.name not in done]
         latest = already_fetched(rss_dir)
         stats = {"parts": 0, "episodes": 0, "skipped": len(done), "stale": 0}
-        for part in parts:
+        for px, part in enumerate(parts):
+            print(f"Processing part {px + 1}/{len(parts)}")
             table = pq.read_table(part, columns=["url", "title", "rss", "fetch_date"])
             rows = []
             for url, podcast, body, fetch_date in zip(
