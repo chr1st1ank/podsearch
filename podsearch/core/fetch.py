@@ -186,15 +186,40 @@ def prune_parts(rss_dir: Path = RSS_DIR, max_age_days: int = 14) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="podsearch-fetch-rss")
-    parser.add_argument("--db", type=Path, default=CATALOG_DB)
-    parser.add_argument("--rss-dir", type=Path, default=RSS_DIR)
-    parser.add_argument("--feeds", type=int, default=10_000)
-    parser.add_argument("--lang", action="append", default=None)
-    parser.add_argument("--min-episodes", type=int, default=20)
-    parser.add_argument("--updated-since", type=int, default=0)
-    parser.add_argument("--order", choices=["recent", "episodes", "popularity"], default="recent")
-    parser.add_argument("--concurrency", type=int, default=32)
+    parser = argparse.ArgumentParser(
+        prog="podsearch-fetch-rss",
+        description="Select catalog feeds and fetch their RSS into parquet parts.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("--db", type=Path, default=CATALOG_DB, help="catalog SQLite database")
+    parser.add_argument(
+        "--rss-dir", type=Path, default=RSS_DIR, help="output directory for parquet parts"
+    )
+    parser.add_argument(
+        "--feeds", type=int, default=10_000, help="maximum number of feeds to select"
+    )
+    parser.add_argument(
+        "--lang",
+        action="append",
+        default=None,
+        help="language filter, repeatable or comma-separated; 'en,de' when omitted",
+    )
+    parser.add_argument(
+        "--min-episodes", type=int, default=20, help="minimum episode count per selected feed"
+    )
+    parser.add_argument(
+        "--updated-since",
+        type=int,
+        default=0,
+        help="only feeds with newest episode at/after this unix timestamp",
+    )
+    parser.add_argument(
+        "--order",
+        choices=["recent", "episodes", "popularity"],
+        default="recent",
+        help="feed selection order",
+    )
+    parser.add_argument("--concurrency", type=int, default=32, help="parallel feed fetches")
     parser.add_argument(
         "--prune-days",
         type=int,

@@ -9,10 +9,21 @@ from podsearch.core.paths import CORPUS_DB, VECTORS_PATH
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="podsearch-index")
-    parser.add_argument("--db", type=Path, default=CORPUS_DB)
-    parser.add_argument("--vectors", type=Path, default=VECTORS_PATH)
-    parser.add_argument("--max-chunks-per-episode", type=int, default=index.MAX_CHUNKS_PER_EPISODE)
+    parser = argparse.ArgumentParser(
+        prog="podsearch-index",
+        description="Embed episode chunks into the float32 vector index.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("--db", type=Path, default=CORPUS_DB, help="corpus SQLite database")
+    parser.add_argument(
+        "--vectors", type=Path, default=VECTORS_PATH, help="output file for raw float32 vectors"
+    )
+    parser.add_argument(
+        "--max-chunks-per-episode",
+        type=int,
+        default=index.MAX_CHUNKS_PER_EPISODE,
+        help="maximum text chunks embedded per episode",
+    )
     args = parser.parse_args()
     t0 = time.perf_counter()
     conn = corpus.open_corpus(args.db)

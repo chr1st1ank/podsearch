@@ -9,10 +9,18 @@ from podsearch.core.paths import CORPUS_DB, RSS_DIR
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="podsearch-ingest")
-    parser.add_argument("--rss-dir", type=Path, default=RSS_DIR)
-    parser.add_argument("--db", type=Path, default=CORPUS_DB)
-    parser.add_argument("--max-per-feed", type=int, default=300)
+    parser = argparse.ArgumentParser(
+        prog="podsearch-ingest",
+        description="Parse stored RSS bodies into the episodes corpus.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--rss-dir", type=Path, default=RSS_DIR, help="directory with fetched parquet parts"
+    )
+    parser.add_argument("--db", type=Path, default=CORPUS_DB, help="corpus SQLite database")
+    parser.add_argument(
+        "--max-per-feed", type=int, default=300, help="maximum episodes ingested per feed"
+    )
     args = parser.parse_args()
     t0 = time.perf_counter()
     stats = corpus.ingest_parts(args.rss_dir, args.db, args.max_per_feed)

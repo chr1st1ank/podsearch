@@ -38,6 +38,7 @@ class Hit:
     score: float
     snippet: str
     link: str
+    pubdate: int
 
 
 def build_index(
@@ -110,7 +111,7 @@ def _hydrate(index: Index, scored: list[tuple[float, int]]) -> list[Hit]:
     rows = {
         r[0]: r
         for r in index.conn.execute(
-            "SELECT c.vector_row, c.text, e.podcast, e.title, e.link"
+            "SELECT c.vector_row, c.text, e.podcast, e.title, e.link, e.pubdate"
             " FROM chunks c JOIN episodes e ON e.id = c.episode_id"
             f" WHERE c.vector_row IN ({placeholders})",
             vector_rows,
@@ -123,6 +124,7 @@ def _hydrate(index: Index, scored: list[tuple[float, int]]) -> list[Hit]:
             score=float(s),
             snippet=rows[i][1][:200],
             link=rows[i][4],
+            pubdate=rows[i][5],
         )
         for s, i in scored
         if i in rows

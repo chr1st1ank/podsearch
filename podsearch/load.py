@@ -12,10 +12,14 @@ QUERIES_PATH = Path(__file__).resolve().parent / "queries.txt"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="podsearch-load")
-    parser.add_argument("--url", default="http://127.0.0.1:8000/search")
-    parser.add_argument("--duration", type=float, default=30)
-    parser.add_argument("--concurrency", type=int, default=4)
+    parser = argparse.ArgumentParser(
+        prog="podsearch-load",
+        description="Threaded load generator for the search endpoint.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("--url", default="http://127.0.0.1:8000/search", help="endpoint to hit")
+    parser.add_argument("--duration", type=float, default=30, help="load duration in seconds")
+    parser.add_argument("--concurrency", type=int, default=4, help="worker threads")
     args = parser.parse_args()
 
     queries = [q for q in QUERIES_PATH.read_text().splitlines() if q.strip()]

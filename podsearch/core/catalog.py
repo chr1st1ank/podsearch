@@ -116,9 +116,13 @@ def select_feeds(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="podsearch-catalog")
-    parser.add_argument("--db", type=Path, default=CATALOG_DB)
-    parser.add_argument("--url", default=CATALOG_URL)
+    parser = argparse.ArgumentParser(
+        prog="podsearch-catalog",
+        description="Download and extract the Podcast Index feed catalog.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("--db", type=Path, default=CATALOG_DB, help="catalog SQLite database path")
+    parser.add_argument("--url", default=CATALOG_URL, help="catalog dump URL to download")
     args = parser.parse_args()
     db = ensure_db(args.db, args.url)
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
