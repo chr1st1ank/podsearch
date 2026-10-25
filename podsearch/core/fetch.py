@@ -6,7 +6,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-import feedparser
+import feedparser  # TODO: kept as slow baseline for the profiling demo
+import feedparser_rs  # TODO: no manylinux cp315 wheel yet - builds from sdist (needs cargo)
 import httpx
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -138,13 +139,18 @@ def fetch_rss(
 
 
 def parse_feed(
-    body: str, feed_url: str, podcast: str, max_episodes: int | None = None
+    body: str,
+    feed_url: str,
+    podcast: str,
+    max_episodes: int | None = None,
+    impl: str = "rs",
 ) -> list[dict[str, Any]]:
     """Parse one RSS body into episode dicts. Used by the ingest stage."""
     import calendar
 
-    # TODO: Bottleneck. Flags lead to 1.65x speedup
-    parsed = feedparser.parse(body, sanitize_html=False, resolve_relative_uris=False)
+    # TODO: Bottleneck (feedparser impl). Flags lead to 1.65x speedup
+    fp = feedparser_rs if impl == "rs" else feedparser
+    parsed = fp.parse(body, sanitize_html=False, resolve_relative_uris=False)
     feed_title = parsed.feed.get("title")
     podcast_name = podcast or (str(feed_title) if feed_title else "")
     episodes: list[dict[str, Any]] = []

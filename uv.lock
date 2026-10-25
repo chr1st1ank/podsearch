@@ -185,6 +185,16 @@ wheels = [
 ]
 
 [[package]]
+name = "feedparser-rs"
+version = "0.7.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d5/ec/b33169c0bfe65fc597a90861e996be65746fe13948490638a68643f6e894/feedparser_rs-0.7.1.tar.gz", hash = "sha256:1fc429bb69992bd6f0067166b9937509d12932debc2f80306848ee9a6f5bcf19", size = 341115, upload-time = "2026-10-21T13:55:06.65Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8d/3a/891522df8a6ef2482cccb910a02df9e4e3edfa511df1051f153675a1e3be/feedparser_rs-0.7.1-cp315-cp315-macosx_10_12_x86_64.whl", hash = "sha256:052ebb24d149508b031d8092c8c907e09f15bd1a8a01cbebb33e34c49ff1e62c", size = 3248297, upload-time = "2026-10-21T13:55:02.34Z" },
+    { url = "https://files.pythonhosted.org/packages/46/02/7c826de030a9c83866606c1bf8ec363109df13c2abe3b23c653e3878b22a/feedparser_rs-0.7.1-cp315-cp315-macosx_11_0_arm64.whl", hash = "sha256:37bdadc9953a0dfae362fbe69666e76a172f992f8d28b5a4c0f35c4ff7a6471f", size = 3069366, upload-time = "2026-10-21T13:55:03.874Z" },
+]
+
+[[package]]
 name = "feedparser-sgmllib"
 version = "2.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -631,6 +641,7 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "feedparser" },
+    { name = "feedparser-rs" },
     { name = "httpx" },
     { name = "model2vec" },
     { name = "polars" },
@@ -655,6 +666,7 @@ test = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "feedparser", specifier = ">=6.0" },
+    { name = "feedparser-rs", specifier = ">=0.7.1" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "model2vec", specifier = ">=0.5" },
     { name = "polars", specifier = ">=2.0.0" },

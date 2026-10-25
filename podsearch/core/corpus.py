@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 
-from podsearch.core.fetch import already_fetched, parse_feed
+from podsearch.core import fetch
 from podsearch.core.paths import CORPUS_DB, RSS_DIR
 
 
@@ -90,13 +90,14 @@ def ingest_parts(
     rss_dir: Path = RSS_DIR,
     db_path: Path = CORPUS_DB,
     max_per_feed: int = 300,
+    impl: str = "rs",
 ) -> dict[str, int]:
     """Parse not-yet-ingested parquet parts into the episodes table."""
     conn = open_corpus(db_path)
     try:
         done = {row[0] for row in conn.execute("SELECT path FROM ingested_parts")}
         parts = [p for p in sorted(rss_dir.glob("part-*.parquet")) if p.name not in done]
-        latest = already_fetched(rss_dir)
+        latest = fetch.already_fetched(rss_dir)
         stats = {"parts": 0, "episodes": 0, "skipped": len(done), "stale": 0}
         for px, part in enumerate(parts):
             print(f"Processing part {px + 1}/{len(parts)}")
@@ -112,7 +113,7 @@ def ingest_parts(
                 if body is None or fetch_date < latest[url]:
                     stats["stale"] += body is not None
                     continue
-                for ep in parse_feed(body, url, podcast or "", max_per_feed):
+                for ep in fetch.parse_feed(body, url, podcast or "", max_per_feed, impl):
                     text = strip_html(f"{ep['title']}\n\n{ep['description']}")
                     if not text:
                         continue

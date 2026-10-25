@@ -12,6 +12,7 @@ dependencies = [
     "feedparser>=6.0",
     "pyarrow>=18.0",
     "polars>=2.0.0",
+    "feedparser-rs>=0.7.1",
 ]
 
 [project.scripts]

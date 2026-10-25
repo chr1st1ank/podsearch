@@ -21,9 +21,12 @@ def main() -> None:
     parser.add_argument(
         "--max-per-feed", type=int, default=300, help="maximum episodes ingested per feed"
     )
+    parser.add_argument(
+        "--impl", choices=["feedparser", "rs"], default="rs", help="feed parser implementation"
+    )
     args = parser.parse_args()
     t0 = time.perf_counter()
-    stats = corpus.ingest_parts(args.rss_dir, args.db, args.max_per_feed)
+    stats = corpus.ingest_parts(args.rss_dir, args.db, args.max_per_feed, args.impl)
     print(
         f"ingested {stats['parts']} new parts ({stats['skipped']} already done), "
         f"{stats['episodes']:,} episodes ({time.perf_counter() - t0:.1f} s)"

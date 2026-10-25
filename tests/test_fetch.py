@@ -42,6 +42,11 @@ def test_parse_feed_max_episodes() -> None:
     assert len(fetch.parse_feed(RSS.decode(), "u", "p", max_episodes=1)) == 1
 
 
+def test_parse_feed_rs_matches_feedparser() -> None:
+    args = (RSS.decode(), "https://feed", "Feed Title")
+    assert fetch.parse_feed(*args, impl="rs") == fetch.parse_feed(*args, impl="feedparser")
+
+
 def _feed(url: str, last_update: int) -> dict[str, str | int]:
     return {"url": url, "lastUpdate": last_update}
 
