@@ -49,6 +49,22 @@ uv run podsearch-ingest                             # --max-per-feed 300 caps lo
 uv run podsearch-index
 ```
 
+### Orchestration
+
+The four stages can also run as a [Dagu](https://dagu.cloud) DAG — a lightweight
+local orchestrator (single binary, web UI with run history and per-step logs).
+The DAG lives in `orchestration/podsearch.yaml` and just wraps the `uv run`
+commands above, so the stages' own idempotency still decides what is skipped.
+Dagu is a mise tool (`mise install`; the task entries call it via
+`mise exec -- dagu`), no Python dependency. Steps run with the repo root as
+working dir (the tasks export `PODSEARCH_DIR`; set it yourself if launching
+dagu by hand):
+
+```bash
+task dagu        # web UI + scheduler on :8081 (no auth; override port via CLI args)
+task pipeline    # one-shot run of the whole DAG
+```
+
 Storage layout (all under gitignored `data/`):
 
 - `podcastindex_feeds.db` — feed catalog (4.7M feeds; metadata only, no episode content)
@@ -171,6 +187,8 @@ task catalog    # download the feed catalog
 task fetch      # fetch RSS into data/rss/
 task ingest     # parse RSS into corpus.db
 task index      # build vectors.f32
+task pipeline   # run the pipeline once via Dagu
+task dagu       # Dagu web UI on :8081
 task bench      # = uv run podsearch bench
 task serve      # = uv run podsearch-serve
 task load       # = uv run podsearch-load

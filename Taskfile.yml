@@ -44,6 +44,21 @@ tasks:
     cmds:
       - uv run podsearch-index {{.CLI_ARGS}}
 
+  pipeline:
+    desc: Run the data pipeline once via Dagu
+    env:
+      PODSEARCH_DIR: "{{.ROOT_DIR}}"
+    cmds:
+      - mise exec -- dagu start orchestration/podsearch.yaml {{.CLI_ARGS}}
+
+  dagu:
+    desc: Dagu web UI + scheduler on :8081 (loads orchestration/)
+    env:
+      PODSEARCH_DIR: "{{.ROOT_DIR}}"
+      DAGU_AUTH_MODE: "none"
+    cmds:
+      - mise exec -- dagu start-all --dags orchestration --port 8081 {{.CLI_ARGS}}
+
   bench:
     desc: Run the search benchmark (profiling target)
     cmds:

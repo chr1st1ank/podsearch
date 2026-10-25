@@ -204,7 +204,7 @@ def main() -> None:
     args = parser.parse_args()
     feeds = catalog.select_feeds(
         args.db,
-        langs=tuple(args.lang) if args.lang else ("en", "de"),
+        langs=tuple(lang for arg in (args.lang or ["en", "de"]) for lang in arg.split(",") if lang),
         min_episodes=args.min_episodes,
         updated_since=args.updated_since,
         limit=args.feeds,
