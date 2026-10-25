@@ -11,6 +11,7 @@ dependencies = [
     "httpx>=0.28",
     "feedparser>=6.0",
     "pyarrow>=18.0",
+    "polars>=2.0.0",
 ]
 
 [project.scripts]
@@ -25,6 +26,7 @@ podsearch-load = "podsearch.load:main"
 [dependency-groups]
 dev = [
     { include-group = "test" },
+    "marimo>=0.25.2",
     "ruff",
     "ty",
 ]
@@ -35,7 +37,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
-exclude-newer = "7 days"   # dependency cooldown; resolved to a timestamp in uv.lock
+exclude-newer = "2 days"   # dependency cooldown; resolved to a timestamp in uv.lock
 
 [tool.hatch.build.targets.wheel]
 packages = ["podsearch"]
@@ -46,6 +48,10 @@ target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# marimo cells end with a bare expression: it is the cell's rendered output
+"notebooks/*.py" = ["B018"]
 
 [tool.ty.rules]
 all = "error"

@@ -59,6 +59,18 @@ Storage layout (all under gitignored `data/`):
   `chunks` (vector_row, episode_id, text), `ingested_parts`, `meta`
 - `vectors.f32` — raw float32 matrix aligned with `chunks.vector_row`
 
+## Exploring the data
+
+`notebooks/sample.py` is a marimo notebook that prints a random sample of each
+store above (run `marimo run` instead of `edit` for a read-only view):
+
+```bash
+uv run marimo edit notebooks/sample.py
+```
+
+(marimo is a dev-group dep, `>=0.25.2` because that release gates its `loro`
+dep behind `python_version < "3.15"` — no cp315 wheels exist.)
+
 ## Search
 
 ```bash
