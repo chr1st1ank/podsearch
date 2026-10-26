@@ -62,27 +62,50 @@ def ensure_db(db_path: Path = CATALOG_DB, url: str = CATALOG_URL) -> Path:
         print(f"catalog already present: {db_path}")
         return db_path
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=db_path.parent, suffix=".tgz", delete=False) as tmp:
-        tmp_path = Path(tmp.name)
-        with httpx.stream("GET", url, timeout=None, follow_redirects=True) as r:
-            r.raise_for_status()
-            for data in r.iter_bytes(1 << 20):
-                tmp.write(data)
+    tgz = db_path.with_name(db_path.name + ".tgz")
+    cleanup = not tgz.exists()
+    if cleanup:
+        tgz = _download(url, db_path.parent)
+    else:
+        print(f"using local archive: {tgz}")
     try:
-        with tarfile.open(tmp_path, "r:gz") as tar, db_path.open("wb") as out:
+        with tarfile.open(tgz, "r:gz") as tar, db_path.open("wb") as out:
             member = next(m for m in tar.getmembers() if m.name.endswith(".db"))
             src = tar.extractfile(member)
             if src is None:
-                raise RuntimeError(f"cannot extract {member.name} from {tmp_path}")
+                raise RuntimeError(f"cannot extract {member.name} from {tgz}")
             while True:
                 data = src.read(1 << 20)
                 if not data:
                     break
                 out.write(data)
     finally:
-        tmp_path.unlink(missing_ok=True)
-    print(f"downloaded catalog to {db_path}")
+        if cleanup:
+            tgz.unlink(missing_ok=True)
+    print(f"extracted catalog to {db_path}")
     return db_path
+
+
+def _download(url: str, dest_dir: Path) -> Path:
+    # public.podcastindex.org 403s non-browser user agents (incl. the httpx default)
+    ua = (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+        " (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+    )
+    headers = {"User-Agent": ua}
+    with tempfile.NamedTemporaryFile(dir=dest_dir, suffix=".tgz", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+        try:
+            with httpx.stream(
+                "GET", url, timeout=None, follow_redirects=True, headers=headers
+            ) as r:
+                r.raise_for_status()
+                for data in r.iter_bytes(1 << 20):
+                    tmp.write(data)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
+    return tmp_path
 
 
 def select_feeds(
