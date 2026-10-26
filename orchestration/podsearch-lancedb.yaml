@@ -1,0 +1,36 @@
+name: podsearch-lancedb
+description: Podcast Index catalog -> RSS fetch -> fused LanceDB ingest+index
+type: graph
+
+# steps must run at the repo root so `uv run` finds the project; Taskfile
+# exports PODSEARCH_DIR={{.ROOT_DIR}} (set it manually if launching dagu by hand)
+working_dir: ${PODSEARCH_DIR}
+
+defaults:
+  retry_policy:
+    limit: 1
+    interval_sec: 30
+
+params:
+  - name: FEEDS
+    default: "100000"
+    description: Number of feeds to fetch (podsearch-fetch-rss --feeds)
+  - name: LANG
+    default: "de"
+    # default: "de,en"  # de + en (the CLI default)
+    description: Comma-separated feed languages (podsearch-fetch-rss --lang)
+
+# catalog + fetch_rss share data/podcastindex_feeds.db and data/rss/*.parquet
+# with the sqlite pipeline (fetch is idempotent); ingest bookkeeping lives in
+# the lancedb store itself, so the pipelines stay independent.
+steps:
+  - id: catalog
+    run: uv run podsearch-catalog
+
+  - id: fetch_rss
+    run: uv run podsearch-fetch-rss --feeds ${FEEDS} --lang=${LANG}
+    depends: catalog
+
+  - id: ingest_lancedb
+    run: uv run podsearch-ingest --impl lancedb
+    depends: fetch_rss

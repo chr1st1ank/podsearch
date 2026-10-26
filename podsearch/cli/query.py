@@ -1,6 +1,7 @@
 """podsearch-query: run a single search."""
 
 import argparse
+from pathlib import Path
 
 from podsearch.cli import common
 from podsearch.core import index
@@ -15,13 +16,16 @@ def main() -> None:
     parser.add_argument("q", help="query text")
     parser.add_argument("-k", type=int, default=5, help="number of hits to show")
     parser.add_argument(
-        "--impl", choices=["naive", "numpy"], default="naive", help="search implementation"
+        "--impl", choices=common.IMPLS, default="naive", help="search implementation"
+    )
+    parser.add_argument(
+        "--lance-dir", type=Path, default=None, help="lancedb store (--impl lancedb)"
     )
     args = parser.parse_args()
 
-    idx = index.load()
+    store = common.open_store(args.impl, args.lance_dir)
     model = index.load_model()
-    hits = common.search_fn(args.impl)(idx, model, args.q, args.k)
+    hits = common.search_fn(args.impl)(store, model, args.q, args.k)
     for hit in sorted(hits, key=lambda h: h.pubdate, reverse=True):
         print(common.fmt_hit(hit))
 

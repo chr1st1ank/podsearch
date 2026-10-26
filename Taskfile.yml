@@ -51,6 +51,13 @@ tasks:
     cmds:
       - mise exec -- dagu start orchestration/podsearch.yaml {{.CLI_ARGS}}
 
+  pipeline-lancedb:
+    desc: Run the lancedb pipeline once via Dagu (fused ingest+index)
+    env:
+      PODSEARCH_DIR: "{{.ROOT_DIR}}"
+    cmds:
+      - mise exec -- dagu start orchestration/podsearch-lancedb.yaml {{.CLI_ARGS}}
+
   dagu:
     desc: Dagu web UI + scheduler on :8081 (loads orchestration/)
     env:
@@ -58,6 +65,11 @@ tasks:
       DAGU_AUTH_MODE: "none"
     cmds:
       - mise exec -- dagu start-all --dags orchestration --port 8081 {{.CLI_ARGS}}
+
+  notebook:
+    desc: Open the data-sampler marimo notebook in the browser
+    cmds:
+      - uv run marimo edit notebooks/sample.py {{.CLI_ARGS}}
 
   bench:
     desc: Run the search benchmark (profiling target)

@@ -13,6 +13,7 @@ dependencies = [
     "pyarrow>=18.0",
     "polars>=2.0.0",
     "feedparser-rs>=0.7.1",
+    "lancedb>=0.40,<1",
 ]
 
 [project.scripts]

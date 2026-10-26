@@ -29,20 +29,35 @@ between Phase 2 (research, mostly done) and Phase 3 (storyline). Drafts live in 
 feeds whose catalog `lastUpdate` is newer than `fetch_date`.
 `podsearch-ingest` — feedparser on stored parts → `data/corpus.db` episodes table
 (incremental via `ingested_parts`; `--max-per-feed` 300 caps mega-feeds).
+Feed-parser selection flag is `--parser {feedparser,rs}` — `--impl` now selects the
+storage backend (`{sqlite,lancedb}`).
 `podsearch-index` — episodes → chunks (≤3/episode) → batched encode → `data/vectors.f32`
 raw float32 + `chunks.vector_row` alignment; `meta` table holds dim/n.
 
-Then `podsearch-query`|`podsearch-bench` (`--impl naive|numpy`), `podsearch-serve` (:8000),
-`podsearch-load`. `podsearch-bench --queries` defaults to 5 — naive is seconds-to-tens-of-
-seconds per query at scale.
+Alternative **lancedb pipeline** (`podsearch-ingest --impl lancedb`): fuses ingest+index —
+serial parse → chunk → batched encode → insert into `data/lancedb/` `chunks` table
+(vector + all metadata columns, no hydration at search time). Incremental via its own
+`ingested_parts` table; delete-then-add per refetched feed; `--rebuild` recreates the
+store; HNSW-SQ cosine ANN index once ≥50k rows. Separate DAG:
+`orchestration/podsearch-lancedb.yaml` (catalog → fetch_rss → ingest_lancedb); both DAGs
+share the rss parquet store intentionally — fetch once, each ingests independently.
+
+Then `podsearch-query`|`podsearch-bench` (`--impl naive|numpy|lancedb`), `podsearch-serve`
+(:8000, takes `--impl`), `podsearch-load`. `podsearch-bench --queries` defaults to 5 —
+naive is seconds-to-tens-of-seconds per query at scale.
 
 ## What exists (verified on Python 3.15.0)
 
 - flat-layout uv/hatchling project (`podsearch/` at root, editable install). Deps: model2vec,
-  fastapi, uvicorn, httpx, feedparser, pyarrow. `task check` = ruff + ty (all error) + pytest.
-- `podsearch/core/{paths,catalog,fetch,corpus,index}.py` (pure lib), `podsearch/api.py` (FastAPI
-  app), `podsearch/cli/{catalog,fetch_rss,ingest,indexing,serve,load,query,bench}.py` (one
-  entrypoint per `podsearch-*` console script, `common.py` for shared query/bench helpers)
+  fastapi, uvicorn, httpx, feedparser, feedparser-rs, pyarrow, polars, lancedb.
+  `task check` = ruff + ty (all error) + pytest.
+- `podsearch/core/{paths,catalog,fetch,corpus,index,lance_store}.py` (pure lib),
+  `podsearch/api.py` (FastAPI app), `podsearch/cli/{catalog,fetch_rss,ingest,indexing,
+  serve,load,query,bench}.py` (one entrypoint per `podsearch-*` console script,
+  `common.py` for shared query/bench helpers)
+- lancedb 0.40 gotchas: `db.list_tables()` returns a paginated response object — use
+  `.tables` for names; `Table.search()` stubs type the builder wrong for vector
+  queries — `cast` for ty; abi3 wheel installs fine on cp315.
 - Index storage is scale-shaped: `vectors.f32` np.memmap + sqlite hydration of top-k hits
   (no `list[list[float]]`, no JSON index — would be GBs at this scale).
 - Verified: catalog idempotent skip; fetch idempotent (`pending 0` on re-run); ingest

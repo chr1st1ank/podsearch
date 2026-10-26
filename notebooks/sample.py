@@ -13,15 +13,23 @@ def imports():
     import numpy as np
     import polars as pl
 
-    from podsearch.core import index
-    from podsearch.core.paths import CATALOG_DB, CORPUS_DB, RSS_DIR, VECTORS_PATH
+    from podsearch.core import index, lance_store
+    from podsearch.core.paths import (
+        CATALOG_DB,
+        CORPUS_DB,
+        LANCE_DIR,
+        RSS_DIR,
+        VECTORS_PATH,
+    )
 
     return (
         CATALOG_DB,
         CORPUS_DB,
+        LANCE_DIR,
         RSS_DIR,
         VECTORS_PATH,
         index,
+        lance_store,
         mo,
         np,
         pl,
@@ -209,6 +217,99 @@ def vectors(CORPUS_DB, VECTORS_PATH, index, mo, n, np, pl, rng, shorten):
                 ]
             )
     _out
+    return
+
+
+@app.cell
+def lancedb(LANCE_DIR, lance_store, mo, n, pl, rng, seed_int, shorten):
+    if not LANCE_DIR.exists():
+        _out = mo.md("`data/lancedb/` not found — run `podsearch-ingest --impl lancedb`")
+        lance_tbl = None
+    else:
+        lance_tbl = lance_store.open_chunks(LANCE_DIR)
+        _stats = lance_tbl.stats()
+        _dim = lance_tbl.schema.field("vector").type.list_size
+        _idx = lance_tbl.list_indices()
+        _names = set(lance_store._connect(LANCE_DIR).list_tables().tables)
+        _n_parts = (
+            lance_store._connect(LANCE_DIR).open_table(lance_store.PARTS_TABLE).count_rows()
+            if lance_store.PARTS_TABLE in _names
+            else 0
+        )
+        _rows = rng.sample(range(_stats["num_rows"]), min(n.value, _stats["num_rows"]))
+        _sample = (
+            pl.from_arrow(
+                lance_tbl.take_offsets(_rows)
+                .select(["podcast", "episode", "pubdate", "text"])
+                .to_arrow()
+            )
+            .with_columns(
+                shorten("text"),
+                pl.from_epoch("pubdate").dt.strftime("%Y-%m-%d").alias("published"),
+            )
+            .drop("pubdate")
+        )
+        _out = mo.vstack(
+            [
+                mo.md(
+                    f"## lancedb — {_stats['num_rows']:,} chunks x {_dim} dims · "
+                    f"{_stats['total_bytes'] / 2**30:.1f} GiB · "
+                    f"{_stats['fragment_stats']['num_fragments']} fragments · "
+                    f"{len(lance_tbl.list_versions())} versions · "
+                    f"{_n_parts} ingested parts"
+                ),
+                mo.md(
+                    "**indexes:** "
+                    + ", ".join(
+                        f"`{i.name}` ({i.index_type}, "
+                        f"{i.num_indexed_rows:,} indexed / {i.num_unindexed_rows:,} unindexed)"
+                        for i in _idx
+                    )
+                ),
+                mo.md("### sample chunks"),
+                _sample,
+            ]
+        )
+    _out
+    return (lance_tbl,)
+
+
+@app.cell
+def lance_model(index):
+    """Cached model2vec loader so repeated searches don't reload."""
+    from functools import cache
+
+    load = cache(index.load_model)
+    return (load,)
+
+
+@app.cell
+def lance_query(mo):
+    query = mo.ui.text(value="Home Assistant", label="query")
+    run = mo.ui.run_button(label="search")
+    mo.vstack([query, run])
+    return query, run
+
+
+@app.cell
+def lance_search(lance_store, lance_tbl, load, mo, pl, query, run, shorten):
+    mo.stop(lance_tbl is None, mo.md("_no lancedb store_"))
+    mo.stop(not run.value, mo.md("_press search_"))
+    _hits = lance_store.search(lance_tbl, load(), query.value, k=10)
+    mo.vstack(
+        [
+            mo.md(f"### hits for `{query.value}`"),
+            pl.DataFrame([h.__dict__ for h in _hits])
+            .with_columns(
+                pl.col("score").round(3),
+                shorten("snippet", 120),
+                pl.from_epoch("pubdate").dt.strftime("%Y-%m-%d").alias("published"),
+            )
+            .drop("pubdate", "link")
+            if _hits
+            else mo.md("_no hits_"),
+        ]
+    )
     return
 
 

@@ -1,9 +1,11 @@
 # podsearch — profiling demo
 
-Semantic search over podcast episodes, built to be profiled. Two search implementations:
+Semantic search over podcast episodes, built to be profiled. Three search implementations:
 
 - `naive`: cosine similarity in a pure-Python loop (`index.search`) — the hot spot
 - `numpy`: the same search as a single matrix product (`index.search_numpy`) — ~100x+ faster
+- `lancedb`: embedded vector DB (`lance_store.search`) — vectors + metadata in one
+  store, no hydration; the "production" impl, outside the profiling story
 
 Model: `model2vec` static embedding `minishlab/potion-base-8M` (256 dims, downloads 30 MB
 from Hugging Face on first use, cached afterwards). Corpus: podcast episodes selected from
@@ -47,6 +49,12 @@ uv run podsearch-ingest                             # --max-per-feed 300 caps lo
 
 # 4. embed episodes into chunks + vectors (full rebuild of derived data)
 uv run podsearch-index
+
+# lancedb alternative: stages 3+4 fused — parse + chunk + encode + insert in one
+# pass into data/lancedb/ (vector + metadata columns in a single `chunks` table;
+# delete-then-add per refetched feed; incremental via its own ingested_parts)
+uv run podsearch-ingest --impl lancedb              # threaded parse, batched encode
+uv run podsearch-ingest --impl lancedb --rebuild    # drop and recreate the store
 ```
 
 ### Orchestration
@@ -60,9 +68,15 @@ Dagu is a mise tool (`mise install`; the task entries call it via
 working dir (the tasks export `PODSEARCH_DIR`; set it yourself if launching
 dagu by hand):
 
+The lancedb pipeline is a separate DAG — `orchestration/podsearch-lancedb.yaml`
+(catalog → fetch_rss → ingest_lancedb; the fused stage replaces ingest+index).
+Both DAGs share the catalog db and rss parquet store (fetch once, ingest into
+each backend independently) and both appear in the same dagu UI.
+
 ```bash
-task dagu        # web UI + scheduler on :8081 (no auth; override port via CLI args)
-task pipeline    # one-shot run of the whole DAG
+task dagu               # web UI + scheduler on :8081 (no auth; override port via CLI args)
+task pipeline           # one-shot run of the sqlite DAG
+task pipeline-lancedb   # one-shot run of the lancedb DAG
 ```
 
 Storage layout (all under gitignored `data/`):
@@ -74,6 +88,9 @@ Storage layout (all under gitignored `data/`):
   upserts on refetch so it mirrors the latest stored feed version),
   `chunks` (vector_row, episode_id, text), `ingested_parts`, `meta`
 - `vectors.f32` — raw float32 matrix aligned with `chunks.vector_row`
+- `lancedb/` — alternative store: one `chunks` table (vector + feed_url, guid,
+  podcast, episode, link, pubdate, text) + `ingested_parts`; ANN index
+  (HNSW-SQ cosine) is built once the table is large enough to train
 
 ## Exploring the data
 
@@ -92,10 +109,12 @@ dep behind `python_version < "3.15"` — no cp315 wheels exist.)
 ```bash
 uv run podsearch-query "startup fundraising advice"
 uv run podsearch-query "startup fundraising advice" --impl numpy
+uv run podsearch-query "startup fundraising advice" --impl lancedb
 
 # benchmark: queries from podsearch/queries.txt
 uv run podsearch-bench --queries 2                 # naive: slow on purpose
 uv run podsearch-bench --impl numpy --queries 20 --repeat 100
+uv run podsearch-bench --impl lancedb --queries 20
 
 # web service (attach target)
 uv run podsearch-serve                                  # serves :8000
@@ -188,7 +207,8 @@ task catalog    # download the feed catalog
 task fetch      # fetch RSS into data/rss/
 task ingest     # parse RSS into corpus.db
 task index      # build vectors.f32
-task pipeline   # run the pipeline once via Dagu
+task pipeline   # run the sqlite pipeline once via Dagu
+task pipeline-lancedb  # run the lancedb pipeline once via Dagu
 task dagu       # Dagu web UI on :8081
 task bench      # = uv run podsearch-bench
 task serve      # = uv run podsearch-serve
@@ -202,6 +222,7 @@ task load       # = uv run podsearch-load
 - `podsearch/core/fetch.py` — idempotent RSS fetch -> parquet parts, `parse_feed`
 - `podsearch/core/corpus.py` — `strip_html`, `chunk`, corpus.db schema, `ingest_parts`
 - `podsearch/core/index.py` — `build_index`, `search` (naive), `search_numpy`, hit hydration
+- `podsearch/core/lance_store.py` — fused ingest+index + `search` for `--impl lancedb`
 - `podsearch/api.py` — FastAPI `/search`, `/search-async` (blocks the event loop), `/health`
 - `podsearch/cli/` — one entrypoint module per `podsearch-*` console script:
   `catalog`, `fetch_rss`, `ingest`, `indexing` (stages 1-4), `serve`, `load`, `query`, `bench`
