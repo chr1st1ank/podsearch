@@ -19,7 +19,7 @@ not the presenter, answer the question.
 
 ## Investigation Strategy
 
-**Define -> Measure -> Locate -> Explain -> Change -> Verify**
+### Define -> Measure -> Locate -> Explain -> Change -> Verify
 
 1. Define the workload and what "fast enough" means.
 2. Measure the whole pipeline without a profiler.
@@ -143,14 +143,14 @@ rather than forcing the data to fit the planned story.
 
 ## Timing
 
-| Minutes | Story beat | What to show |
-| --- | --- | --- |
-| 0-4 | Problem and prediction | Use case, pipeline, audience vote |
-| 4-8 | Baseline | Live run and stage timing breakdown |
-| 8-15 | Investigation | Profile the slowest stage, read the flamegraph and code |
-| 15-20 | One improvement | Prepared change, correctness check, full-pipeline rerun |
-| 20-23 | Results | Before/after timings, total gain and remaining bottleneck |
-| 23-25 | Takeaways and buffer | Recap the strategy and stopping condition |
+| Minutes | Story beat             | What to show                                              |
+|---------|------------------------|-----------------------------------------------------------|
+| 0-4     | Problem and prediction | Use case, pipeline, audience vote                         |
+| 4-8     | Baseline               | Live run and stage timing breakdown                       |
+| 8-15    | Investigation          | Profile the slowest stage, read the flamegraph and code   |
+| 15-20   | One improvement        | Prepared change, correctness check, full-pipeline rerun   |
+| 20-23   | Results                | Before/after timings, total gain and remaining bottleneck |
+| 23-25   | Takeaways and buffer   | Recap the strategy and stopping condition                 |
 
 ## Presentation Guardrails
 

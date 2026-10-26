@@ -18,7 +18,7 @@ from pathlib import Path
 import polars as pl
 from qdrant_client import QdrantClient, models
 
-from podsearch.core import ingest_common
+from podsearch.core import index, ingest_common
 from podsearch.core.index import ENCODE_BATCH, MAX_CHUNKS_PER_EPISODE, Hit
 from podsearch.core.paths import QDRANT_URL, RSS_DIR
 
@@ -171,16 +171,23 @@ def ingest_parts(
 def search(client: QdrantClient, model, q: str, k: int = 5) -> list[Hit]:
     """Vector search; payload carries all metadata so hits need no hydration."""
     vec = [float(x) for x in model.encode([q])[0]]
-    res = client.query_points(CHUNKS_COLLECTION, query=vec, limit=k, with_payload=True)
-    return [
-        Hit(
-            podcast=p.payload["podcast"],
-            episode=p.payload["episode"],
-            score=p.score,
-            snippet=p.payload["text"][:200],
-            link=p.payload["link"],
-            pubdate=p.payload["pubdate"],
-        )
-        for p in res.points
-        if p.payload is not None
-    ]
+    res = client.query_points(
+        CHUNKS_COLLECTION, query=vec, limit=k * index.SEARCH_OVERFETCH, with_payload=True
+    )
+    return index.dedup_hits(
+        [
+            Hit(
+                podcast=p.payload["podcast"],
+                episode=p.payload["episode"],
+                score=p.score,
+                snippet=p.payload["text"][:200],
+                link=p.payload["link"],
+                pubdate=p.payload["pubdate"],
+                feed_url=p.payload["feed_url"],
+                guid=p.payload["guid"],
+            )
+            for p in res.points
+            if p.payload is not None
+        ],
+        k,
+    )

@@ -74,7 +74,7 @@ The readable view is by thread and library, without call graphs:
 perf report -i results/ingest.perf.data --no-children --sort comm,dso --stdio -g none | grep -v '^#' | grep -v '^$'
 ```
 
-```
+```text
 95.39%  lancedb-tokio-w  _lancedb.abi3.so
  3.06%  lancedb-tokio-w  [kernel.kallsyms]
  1.26%  lancedb-tokio-w  libc.so.6

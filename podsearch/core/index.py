@@ -16,6 +16,9 @@ if TYPE_CHECKING:
 MODEL_NAME = "minishlab/potion-multilingual-128M"
 MAX_CHUNKS_PER_EPISODE = 3
 ENCODE_BATCH = 512
+# Hits repeat an episode for several reasons (chunks per episode, republished
+# feeds). Fetch extra candidates so dedup_hits can still return k episodes.
+SEARCH_OVERFETCH = 3
 
 
 def load_model() -> StaticModel:
@@ -39,6 +42,32 @@ class Hit:
     snippet: str
     link: str
     pubdate: int
+    feed_url: str
+    guid: str
+
+
+def dedup_hits(hits: list[Hit], k: int) -> list[Hit]:
+    """Keep the best-scoring hit per episode; input must arrive score-ordered.
+
+    (feed_url, guid) drops repeated chunks of one episode; (title, pubdate)
+    additionally drops the same episode republished on sibling feeds (media
+    variants, syndication). Generic titles are exempt from the text key.
+    """
+    seen_ids: set[tuple[str, str]] = set()
+    seen_text: set[tuple[str, int]] = set()
+    out = []
+    for h in hits:
+        dup = (h.feed_url, h.guid) in seen_ids or (
+            h.episode not in ("", "(untitled)") and (h.episode, h.pubdate) in seen_text
+        )
+        if dup:
+            continue
+        seen_ids.add((h.feed_url, h.guid))
+        seen_text.add((h.episode, h.pubdate))
+        out.append(h)
+        if len(out) >= k:
+            break
+    return out
 
 
 def build_index(
@@ -75,7 +104,7 @@ def build_index(
     conn.execute("DELETE FROM chunks")
     with vectors_path.open("wb") as f:
         for ep_id, text in corpus.iter_episodes(conn):
-            for c in corpus.chunk(text)[:max_chunks]:
+            for c in dict.fromkeys(corpus.chunk(text)[:max_chunks]):
                 texts.append(c)
                 episode_ids.append(ep_id)
                 if len(texts) >= batch:
@@ -111,7 +140,8 @@ def _hydrate(index: Index, scored: list[tuple[float, int]]) -> list[Hit]:
     rows = {
         r[0]: r
         for r in index.conn.execute(
-            "SELECT c.vector_row, c.text, e.podcast, e.title, e.link, e.pubdate"
+            "SELECT c.vector_row, c.text, e.podcast, e.title, e.link, e.pubdate,"
+            " e.feed_url, e.guid"
             " FROM chunks c JOIN episodes e ON e.id = c.episode_id"
             f" WHERE c.vector_row IN ({placeholders})",
             vector_rows,
@@ -125,6 +155,8 @@ def _hydrate(index: Index, scored: list[tuple[float, int]]) -> list[Hit]:
             snippet=rows[i][1][:200],
             link=rows[i][4],
             pubdate=rows[i][5],
+            feed_url=rows[i][6],
+            guid=rows[i][7],
         )
         for s, i in scored
         if i in rows
@@ -136,7 +168,7 @@ def search(index: Index, model, query: str, k: int = 5) -> list[Hit]:
     q = model.encode([query])[0].tolist()
     scored = [(_cosine(q, v), i) for i, v in enumerate(index.vectors)]
     scored.sort(reverse=True)
-    return _hydrate(index, scored[:k])
+    return dedup_hits(_hydrate(index, scored[: k * SEARCH_OVERFETCH]), k)
 
 
 def search_numpy(index: Index, model, query: str, k: int = 5) -> list[Hit]:
@@ -154,7 +186,7 @@ def search_numpy(index: Index, model, query: str, k: int = 5) -> list[Hit]:
     if nq:
         q /= nq
     scores = matrix @ q
-    k = min(k, len(scores))
-    top = np.argpartition(scores, -k)[-k:]
+    limit = min(k * SEARCH_OVERFETCH, len(scores))
+    top = np.argpartition(scores, -limit)[-limit:]
     top = top[np.argsort(scores[top])[::-1]]
-    return _hydrate(index, [(float(scores[i]), int(i)) for i in top])
+    return dedup_hits(_hydrate(index, [(float(scores[i]), int(i)) for i in top]), k)

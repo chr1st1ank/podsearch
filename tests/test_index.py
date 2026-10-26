@@ -60,6 +60,38 @@ def test_build_and_search_roundtrip(tmp_path) -> None:
     idx.conn.close()
 
 
+def test_search_dedups_chunks_of_one_episode(tmp_path) -> None:
+    db = tmp_path / "corpus.db"
+    vectors = tmp_path / "vectors.f32"
+    conn = _tiny_corpus(db)
+    text = " ".join(["word"] * 250)
+    conn.executemany(
+        "INSERT INTO episodes(feed_url, guid, podcast, title, link, pubdate, text)"
+        " VALUES (?,?,?,?,?,?,?)",
+        [
+            ("u2", "g3", "Pod C", "Episode three", "l3", 100, text),
+            # same episode republished on a sibling feed -> text dedup
+            ("u3", "g4", "Pod C HD", "Episode three", "l4", 100, text),
+            # same title on another day is a different episode -> stays
+            ("u4", "g5", "Pod D", "Episode three", "l5", 200, "delta epsilon"),
+        ],
+    )
+    conn.commit()
+    n = index.build_index(conn, FakeModel([1.0, 0.0]), vectors)
+    assert n == 7
+    conn.close()
+
+    idx = index.load(vectors, db)
+    for fn in (index.search, index.search_numpy):
+        hits = fn(idx, FakeModel([1.0, 0.0]), "q", k=5)
+        assert [h.episode for h in hits].count("Episode three") == 2
+        kept = {(h.podcast, h.pubdate) for h in hits if h.episode == "Episode three"}
+        assert ("Pod D", 200) in kept
+        # one of the two republished copies survives - which one is arbitrary on ties
+        assert kept - {("Pod D", 200)} <= {("Pod C", 100), ("Pod C HD", 100)}
+    idx.conn.close()
+
+
 class ZeroVecModel:
     """Zero vector for texts containing 'zword' - simulates all-OOV chunks."""
 

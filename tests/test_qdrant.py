@@ -1,23 +1,10 @@
 """Tests for podsearch.core.qdrant_store using synthetic parquet parts and in-memory qdrant."""
 
-import pyarrow.parquet as pq
 import pytest
 from qdrant_client import QdrantClient
 
-from podsearch.core import fetch, qdrant_store
-from tests.test_lance import RSS, FakeModel
-
-
-def _write_part(rss_dir, seq: int, feed_url: str, title: str, fetch_date: int) -> None:
-    records = [
-        {
-            "url": feed_url,
-            "title": "Pod A",
-            "rss": RSS.format(title=title, desc="alpha beta gamma"),
-            "fetch_date": fetch_date,
-        }
-    ]
-    pq.write_table(fetch._part_table(records), rss_dir / f"part-{seq:04d}.parquet")
+from podsearch.core import qdrant_store
+from tests.test_lance import FakeModel, _write_part
 
 
 @pytest.fixture
@@ -38,6 +25,16 @@ def test_ingest_and_search_roundtrip(env) -> None:
     assert hits[0].score == pytest.approx(1.0)
     assert (hits[0].podcast, hits[0].episode) == ("Pod A", "Episode one")
     assert hits[0].pubdate > 0
+
+
+def test_search_dedups_chunks_of_one_episode(env) -> None:
+    rss_dir, client = env
+    _write_part(rss_dir, 0, "u1", "Episode one", 1000, desc=" ".join(["word"] * 250))
+    stats = qdrant_store.ingest_parts(FakeModel(), rss_dir=rss_dir, client=client)
+    assert stats["chunks"] == 2
+
+    hits = qdrant_store.search(client, FakeModel(), "query", k=5)
+    assert [h.episode for h in hits] == ["Episode one"]
 
 
 def test_ingest_idempotent_and_replace(env) -> None:

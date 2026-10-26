@@ -36,9 +36,19 @@ def strip_html(text: str) -> str:
 
 
 def chunk(text: str, size: int = 200, overlap: int = 40) -> list[str]:
-    """Split into word chunks with overlap."""
+    """Split into word chunks with overlap.
+
+    A leftover tail of at most `overlap` words is folded into the last
+    window instead of producing a sliver chunk.
+    """
     words = text.split()
-    return [" ".join(words[i : i + size]) for i in range(0, len(words), size - overlap)]
+    chunks = []
+    for i in range(0, len(words), size - overlap):
+        if len(words) - (i + size) <= overlap:
+            chunks.append(" ".join(words[i:]))
+            break
+        chunks.append(" ".join(words[i : i + size]))
+    return chunks
 
 
 _SCHEMA = """

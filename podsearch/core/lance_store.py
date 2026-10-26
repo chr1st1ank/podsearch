@@ -19,7 +19,7 @@ import numpy as np
 import polars as pl
 import pyarrow as pa
 
-from podsearch.core import ingest_common
+from podsearch.core import index, ingest_common
 from podsearch.core.index import ENCODE_BATCH, MAX_CHUNKS_PER_EPISODE, Hit
 from podsearch.core.paths import LANCE_DIR, RSS_DIR
 
@@ -174,15 +174,20 @@ def search(tbl: Table, model, q: str, k: int = 5) -> list[Hit]:
     # stubs type search() as LanceQueryBuilder; a vector query yields the
     # vector builder that has .metric()
     builder = cast("LanceVectorQueryBuilder", tbl.search(q_vec))
-    rows = builder.metric("cosine").limit(k).to_list()
-    return [
-        Hit(
-            podcast=r["podcast"],
-            episode=r["episode"],
-            score=0.0 if math.isnan(r["_distance"]) else 1.0 - r["_distance"],
-            snippet=r["text"][:200],
-            link=r["link"],
-            pubdate=r["pubdate"],
-        )
-        for r in rows
-    ]
+    rows = builder.metric("cosine").limit(k * index.SEARCH_OVERFETCH).to_list()
+    return index.dedup_hits(
+        [
+            Hit(
+                podcast=r["podcast"],
+                episode=r["episode"],
+                score=0.0 if math.isnan(r["_distance"]) else 1.0 - r["_distance"],
+                snippet=r["text"][:200],
+                link=r["link"],
+                pubdate=r["pubdate"],
+                feed_url=r["feed_url"],
+                guid=r["guid"],
+            )
+            for r in rows
+        ],
+        k,
+    )

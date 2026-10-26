@@ -22,12 +22,14 @@ class FakeModel:
         return np.tile(np.asarray([1.0, 0.0], dtype=np.float32), (len(texts), 1))
 
 
-def _write_part(rss_dir, seq: int, feed_url: str, title: str, fetch_date: int) -> None:
+def _write_part(
+    rss_dir, seq: int, feed_url: str, title: str, fetch_date: int, desc: str = "alpha beta gamma"
+) -> None:
     records = [
         {
             "url": feed_url,
             "title": "Pod A",
-            "rss": RSS.format(title=title, desc="alpha beta gamma"),
+            "rss": RSS.format(title=title, desc=desc),
             "fetch_date": fetch_date,
         }
     ]
@@ -51,6 +53,19 @@ def test_ingest_and_search_roundtrip(tmp_path) -> None:
     assert hits[0].podcast == "Pod A"
     assert hits[0].episode == "Episode one"
     assert hits[0].pubdate > 0
+
+
+def test_search_dedups_chunks_of_one_episode(tmp_path) -> None:
+    rss_dir = tmp_path / "rss"
+    rss_dir.mkdir()
+    lance_dir = tmp_path / "lancedb"
+    # ~250-word description -> two chunks for the same episode
+    _write_part(rss_dir, 0, "u1", "Episode one", 1000, desc=" ".join(["word"] * 250))
+    stats = lance_store.ingest_parts(FakeModel(), rss_dir=rss_dir, path=lance_dir)
+    assert stats["chunks"] == 2
+
+    hits = lance_store.search(lance_store.open_chunks(lance_dir), FakeModel(), "query", k=5)
+    assert [h.episode for h in hits] == ["Episode one"]
 
 
 def test_ingest_idempotent_and_replace(tmp_path) -> None:

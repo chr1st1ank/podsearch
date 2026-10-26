@@ -93,7 +93,11 @@ def select_feeds(
     limit: int = 10_000,
     order: str = "recent",
 ) -> list[dict[str, Any]]:
-    """Pick feeds from the catalog; returns one dict per feed (all columns)."""
+    """Pick feeds from the catalog; returns one dict per feed (all columns).
+
+    Feeds sharing a non-empty chash are the same feed content under alias
+    URLs; keep only the first per chash in the chosen order.
+    """
     order_sql = {
         "recent": "newestItemPubdate DESC",
         "episodes": "episodeCount DESC",
@@ -106,9 +110,18 @@ def select_feeds(
         rows = conn.execute(
             f"SELECT * FROM podcasts WHERE episodeCount >= ?"
             f" AND newestItemPubdate >= ? AND ({lang_sql})"
-            f" ORDER BY {order_sql} LIMIT ?",
-            (min_episodes, updated_since, *(f"{lang}%" for lang in langs), limit),
-        ).fetchall()
+            f" ORDER BY {order_sql}",
+            (min_episodes, updated_since, *(f"{lang}%" for lang in langs)),
+        )
+        feeds: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in rows:
+            if row["chash"] and row["chash"] in seen:
+                continue
+            seen.add(row["chash"])
+            feeds.append(dict(row))
+            if len(feeds) >= limit:
+                break
     finally:
         conn.close()
-    return [dict(row) for row in rows]
+    return feeds
