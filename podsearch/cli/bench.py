@@ -25,9 +25,10 @@ def main() -> None:
     parser.add_argument(
         "--lance-dir", type=Path, default=None, help="lancedb store (--impl lancedb)"
     )
+    parser.add_argument("--qdrant-url", default=None, help="qdrant server URL (--impl qdrant)")
     args = parser.parse_args()
 
-    store = common.open_store(args.impl, args.lance_dir)
+    store = common.open_store(args.impl, args.lance_dir, args.qdrant_url)
     model = index.load_model()
     queries = common.QUERIES_PATH.read_text().splitlines()[: args.queries]
     search = common.search_fn(args.impl)

@@ -91,12 +91,15 @@ def ingest_parts(
     db_path: Path = CORPUS_DB,
     max_per_feed: int = 300,
     impl: str = "rs",
+    max_parts: int | None = None,
 ) -> dict[str, int]:
-    """Parse not-yet-ingested parquet parts into the episodes table."""
+    """Parse not-yet-ingested parquet parts (at most max_parts) into the episodes table."""
     conn = open_corpus(db_path)
     try:
         done = {row[0] for row in conn.execute("SELECT path FROM ingested_parts")}
-        parts = [p for p in sorted(rss_dir.glob("part-*.parquet")) if p.name not in done]
+        parts = [p for p in sorted(rss_dir.glob("part-*.parquet")) if p.name not in done][
+            :max_parts
+        ]
         latest = fetch.already_fetched(rss_dir)
         stats = {"parts": 0, "episodes": 0, "skipped": len(done), "stale": 0}
         for px, part in enumerate(parts):

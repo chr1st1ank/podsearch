@@ -58,6 +58,23 @@ tasks:
     cmds:
       - mise exec -- dagu start orchestration/podsearch-lancedb.yaml {{.CLI_ARGS}}
 
+  pipeline-qdrant:
+    desc: Run the qdrant pipeline once via Dagu (fused ingest+index; needs task qdrant-up)
+    env:
+      PODSEARCH_DIR: "{{.ROOT_DIR}}"
+    cmds:
+      - mise exec -- dagu start orchestration/podsearch-qdrant.yaml {{.CLI_ARGS}}
+
+  qdrant-up:
+    desc: Start the Qdrant server on :6333 (Docker)
+    cmds:
+      - docker compose up -d qdrant
+
+  qdrant-down:
+    desc: Stop the Qdrant server
+    cmds:
+      - docker compose down
+
   dagu:
     desc: Dagu web UI + scheduler on :8081 (loads orchestration/)
     env:

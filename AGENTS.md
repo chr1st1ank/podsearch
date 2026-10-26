@@ -42,7 +42,14 @@ store; HNSW-SQ cosine ANN index once ≥50k rows. Separate DAG:
 `orchestration/podsearch-lancedb.yaml` (catalog → fetch_rss → ingest_lancedb); both DAGs
 share the rss parquet store intentionally — fetch once, each ingests independently.
 
-Then `podsearch-query`|`podsearch-bench` (`--impl naive|numpy|lancedb`), `podsearch-serve`
+Alternative **qdrant pipeline** (`podsearch-ingest --impl qdrant`): same fused flow into a
+Qdrant server (`task qdrant-up`, docker compose, data in `data/qdrant/`; URL via
+`--qdrant-url`/`PODSEARCH_QDRANT_URL`). `chunks` collection (cosine, payload = metadata,
+keyword index on feed_url), `ingested_parts` bookkeeping, deterministic uuid5 point ids,
+HNSW build deferred (indexing_threshold=0) until bulk load ends. DAG:
+`orchestration/podsearch-qdrant.yaml`. Shared helpers in `core/ingest_common.py`.
+
+Then `podsearch-query`|`podsearch-bench` (`--impl naive|numpy|lancedb|qdrant`), `podsearch-serve`
 (:8000, takes `--impl`), `podsearch-load`. `podsearch-bench --queries` defaults to 5 —
 naive is seconds-to-tens-of-seconds per query at scale.
 

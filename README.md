@@ -6,6 +6,8 @@ Semantic search over podcast episodes, built to be profiled. Three search implem
 - `numpy`: the same search as a single matrix product (`index.search_numpy`) — ~100x+ faster
 - `lancedb`: embedded vector DB (`lance_store.search`) — vectors + metadata in one
   store, no hydration; the "production" impl, outside the profiling story
+- `qdrant`: Qdrant server in Docker (`qdrant_store.search`) — same fused layout as lancedb,
+  vectors + payload in one collection, server-side HNSW
 
 Model: `model2vec` static embedding `minishlab/potion-base-8M` (256 dims, downloads 30 MB
 from Hugging Face on first use, cached afterwards). Corpus: podcast episodes selected from
@@ -55,6 +57,11 @@ uv run podsearch-index
 # delete-then-add per refetched feed; incremental via its own ingested_parts)
 uv run podsearch-ingest --impl lancedb              # threaded parse, batched encode
 uv run podsearch-ingest --impl lancedb --rebuild    # drop and recreate the store
+
+# qdrant alternative: same fused ingest into a Qdrant server (docker compose)
+task qdrant-up                                      # Qdrant on :6333, storage in data/qdrant/
+uv run podsearch-ingest --impl qdrant               # --qdrant-url / PODSEARCH_QDRANT_URL to override
+uv run podsearch-ingest --impl qdrant --rebuild     # drop and recreate the collections
 ```
 
 ### Orchestration
@@ -77,6 +84,7 @@ each backend independently) and both appear in the same dagu UI.
 task dagu               # web UI + scheduler on :8081 (no auth; override port via CLI args)
 task pipeline           # one-shot run of the sqlite DAG
 task pipeline-lancedb   # one-shot run of the lancedb DAG
+task pipeline-qdrant    # one-shot run of the qdrant DAG (needs task qdrant-up)
 ```
 
 Storage layout (all under gitignored `data/`):
@@ -91,6 +99,8 @@ Storage layout (all under gitignored `data/`):
 - `lancedb/` — alternative store: one `chunks` table (vector + feed_url, guid,
   podcast, episode, link, pubdate, text) + `ingested_parts`; ANN index
   (HNSW-SQ cosine) is built once the table is large enough to train
+- `qdrant/` — Qdrant server storage (compose volume): `chunks` collection (vector +
+  same payload) and `ingested_parts`
 
 ## Exploring the data
 
@@ -110,11 +120,13 @@ dep behind `python_version < "3.15"` — no cp315 wheels exist.)
 uv run podsearch-query "startup fundraising advice"
 uv run podsearch-query "startup fundraising advice" --impl numpy
 uv run podsearch-query "startup fundraising advice" --impl lancedb
+uv run podsearch-query "startup fundraising advice" --impl qdrant
 
 # benchmark: queries from podsearch/queries.txt
 uv run podsearch-bench --queries 2                 # naive: slow on purpose
 uv run podsearch-bench --impl numpy --queries 20 --repeat 100
 uv run podsearch-bench --impl lancedb --queries 20
+uv run podsearch-bench --impl qdrant --queries 20
 
 # web service (attach target)
 uv run podsearch-serve                                  # serves :8000
@@ -223,6 +235,8 @@ task load       # = uv run podsearch-load
 - `podsearch/core/corpus.py` — `strip_html`, `chunk`, corpus.db schema, `ingest_parts`
 - `podsearch/core/index.py` — `build_index`, `search` (naive), `search_numpy`, hit hydration
 - `podsearch/core/lance_store.py` — fused ingest+index + `search` for `--impl lancedb`
+- `podsearch/core/qdrant_store.py` — fused ingest+index + `search` for `--impl qdrant`
+- `podsearch/core/ingest_common.py` — chunking/embedding helpers shared by both fused stores
 - `podsearch/api.py` — FastAPI `/search`, `/search-async` (blocks the event loop), `/health`
 - `podsearch/cli/` — one entrypoint module per `podsearch-*` console script:
   `catalog`, `fetch_rss`, `ingest`, `indexing` (stages 1-4), `serve`, `load`, `query`, `bench`

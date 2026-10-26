@@ -14,6 +14,7 @@ dependencies = [
     "polars>=2.0.0",
     "feedparser-rs>=0.7.1",
     "lancedb>=0.40,<1",
+    "qdrant-client>=1.20.0",
 ]
 
 [project.scripts]
@@ -62,6 +63,7 @@ all = "error"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers --strict-config"
+filterwarnings = ["ignore:Payload indexes have no effect:UserWarning"]
 
 [tool.coverage.run]
 branch = true
