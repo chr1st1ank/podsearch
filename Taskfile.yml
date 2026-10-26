@@ -62,7 +62,7 @@ tasks:
   bench:
     desc: Run the search benchmark (profiling target)
     cmds:
-      - uv run podsearch bench {{.CLI_ARGS}}
+      - uv run podsearch-bench {{.CLI_ARGS}}
 
   serve:
     desc: Run the FastAPI service on :8000 (attach target)

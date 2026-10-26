@@ -1,6 +1,5 @@
 """FastAPI endpoint for the podcast search - attach-profiling target."""
 
-import uvicorn
 from fastapi import FastAPI
 
 from podsearch.core import index
@@ -34,11 +33,3 @@ def search(q: str, k: int = 5) -> list[index.Hit]:
 async def search_async(q: str, k: int = 5) -> list[index.Hit]:
     idx, model = _ensure_loaded()
     return index.search(idx, model, q, k)
-
-
-def main() -> None:
-    uvicorn.run(app, host="127.0.0.1", port=8000)
-
-
-if __name__ == "__main__":
-    main()

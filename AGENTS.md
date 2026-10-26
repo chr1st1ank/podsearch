@@ -32,15 +32,17 @@ feeds whose catalog `lastUpdate` is newer than `fetch_date`.
 `podsearch-index` — episodes → chunks (≤3/episode) → batched encode → `data/vectors.f32`
 raw float32 + `chunks.vector_row` alignment; `meta` table holds dim/n.
 
-Then `podsearch query|bench` (`--impl naive|numpy`), `podsearch-serve` (:8000),
-`podsearch-load`. `podsearch bench --queries` defaults to 5 — naive is seconds-to-tens-of-
+Then `podsearch-query`|`podsearch-bench` (`--impl naive|numpy`), `podsearch-serve` (:8000),
+`podsearch-load`. `podsearch-bench --queries` defaults to 5 — naive is seconds-to-tens-of-
 seconds per query at scale.
 
 ## What exists (verified on Python 3.15.0)
 
 - flat-layout uv/hatchling project (`podsearch/` at root, editable install). Deps: model2vec,
   fastapi, uvicorn, httpx, feedparser, pyarrow. `task check` = ruff + ty (all error) + pytest.
-- `podsearch/core/{paths,catalog,fetch,corpus,index}.py`, `podsearch/{cli,ingest,indexing,api,load}.py`
+- `podsearch/core/{paths,catalog,fetch,corpus,index}.py` (pure lib), `podsearch/api.py` (FastAPI
+  app), `podsearch/cli/{catalog,fetch_rss,ingest,indexing,serve,load,query,bench}.py` (one
+  entrypoint per `podsearch-*` console script, `common.py` for shared query/bench helpers)
 - Index storage is scale-shaped: `vectors.f32` np.memmap + sqlite hydration of top-k hits
   (no `list[list[float]]`, no JSON index — would be GBs at this scale).
 - Verified: catalog idempotent skip; fetch idempotent (`pending 0` on re-run); ingest

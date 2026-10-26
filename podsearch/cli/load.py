@@ -4,11 +4,10 @@ import argparse
 import statistics
 import threading
 import time
-from pathlib import Path
 
 import httpx
 
-QUERIES_PATH = Path(__file__).resolve().parent / "queries.txt"
+from podsearch.cli.common import QUERIES_PATH
 
 
 def main() -> None:

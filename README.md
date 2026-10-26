@@ -5,7 +5,7 @@ Semantic search over podcast episodes, built to be profiled. Two search implemen
 - `naive`: cosine similarity in a pure-Python loop (`index.search`) — the hot spot
 - `numpy`: the same search as a single matrix product (`index.search_numpy`) — ~100x+ faster
 
-Model: `model2vec` static embedding `minishlab/potion-base-8M` (256 dims, downloads ~30 MB
+Model: `model2vec` static embedding `minishlab/potion-base-8M` (256 dims, downloads 30 MB
 from Hugging Face on first use, cached afterwards). Corpus: podcast episodes selected from
 the Podcast Index catalog and fetched via RSS. Index: `data/vectors.f32` (raw float32 matrix,
 memory-mapped) + `data/corpus.db` (SQLite: episodes, chunks, ingest bookkeeping).
@@ -27,7 +27,7 @@ flowchart TD
     C3 -->|"newest version per feed ·<br/>upsert episodes"| CORP[("data/corpus.db<br/>episodes + chunks")]
     CORP --> C4["podsearch-index"]
     C4 -->|"chunk + encode"| VEC[("data/vectors.f32")]
-    VEC -->|"cosine: naive vs numpy"| S5["podsearch query · bench ·<br/>serve · load"]
+    VEC -->|"cosine: naive vs numpy"| S5["podsearch-query · -bench ·<br/>-serve · -load"]
     CORP -->|"hydrate top-k"| S5
 ```
 
@@ -90,12 +90,12 @@ dep behind `python_version < "3.15"` — no cp315 wheels exist.)
 ## Search
 
 ```bash
-uv run podsearch query "startup fundraising advice"
-uv run podsearch query "startup fundraising advice" --impl numpy
+uv run podsearch-query "startup fundraising advice"
+uv run podsearch-query "startup fundraising advice" --impl numpy
 
 # benchmark: queries from podsearch/queries.txt
-uv run podsearch bench --queries 2                 # naive: slow on purpose
-uv run podsearch bench --impl numpy --queries 20 --repeat 100
+uv run podsearch-bench --queries 2                 # naive: slow on purpose
+uv run podsearch-bench --impl numpy --queries 20 --repeat 100
 
 # web service (attach target)
 uv run podsearch-serve                                  # serves :8000
@@ -105,8 +105,8 @@ uv run podsearch-load --duration 30 --concurrency 4
 uv run podsearch-load --url http://127.0.0.1:8000/search-async --duration 30
 ```
 
-The `-m` form also works (`uv run python -m podsearch.cli bench`,
-`uv run python -m podsearch.ingest`).
+The `-m` form also works (`uv run python -m podsearch.cli.bench`,
+`uv run python -m podsearch.cli.ingest`).
 
 ## Profiling with Tachyon (Python 3.15, `profiling.sampling`)
 
@@ -120,29 +120,30 @@ work without clobbering the actual stores: `--db data/corpus-prof.db` (ingest),
 
 ```bash
 # ingest: feedparser is CPU-bound — the classic flamegraph target
-uv run python -m profiling.sampling run -m podsearch.ingest --db data/corpus-prof.db
-uv run python -m profiling.sampling run --flamegraph -o results/ingest.html -m podsearch.ingest --db data/corpus-prof.db
-uv run python -m profiling.sampling run --heatmap    -o results/ingest-heat -m podsearch.ingest --db data/corpus-prof.db
-uv run python -m profiling.sampling run --collapsed  -o results/ingest.txt  -m podsearch.ingest --db data/corpus-prof.db
-uv run python -m profiling.sampling run -r 10khz --flamegraph -o results/ingest-10khz.html -m podsearch.ingest --db data/corpus-prof.db
-uv run python -m profiling.sampling run --opcodes --flamegraph -o results/ingest-opcodes.html -m podsearch.ingest --db data/corpus-prof.db
-uv run python -m profiling.sampling run --mode=cpu       -m podsearch.ingest --db data/corpus-prof.db
-uv run python -m profiling.sampling run --mode=exception -m podsearch.ingest --db data/corpus-prof.db
+uv run python -m profiling.sampling run -m podsearch.cli.ingest --db data/corpus-prof.db
+uv run python -m profiling.sampling run --flamegraph -o results/ingest.html -m podsearch.cli.ingest --db data/corpus-prof.db
+uv run python -m profiling.sampling run --heatmap    -o results/ingest-heat -m podsearch.cli.ingest --db data/corpus-prof.db
+uv run python -m profiling.sampling run --collapsed  -o results/ingest.txt  -m podsearch.cli.ingest --db data/corpus-prof.db
+uv run python -m profiling.sampling run -r 10khz --flamegraph -o results/ingest-10khz.html -m podsearch.cli.ingest --db data/corpus-prof.db
+uv run python -m profiling.sampling run --opcodes --flamegraph -o results/ingest-opcodes.html -m podsearch.cli.ingest --db data/corpus-prof.db
+uv run python -m profiling.sampling run --mode=cpu       -m podsearch.cli.ingest --db data/corpus-prof.db
+uv run python -m profiling.sampling run --mode=exception -m podsearch.cli.ingest --db data/corpus-prof.db
 
 # fetch-rss: 32 threads waiting on the network — wall vs cpu diverge,
 # gil shows the threads aren't GIL-bound
-uv run python -m profiling.sampling run --mode=wall -m podsearch.core.fetch --rss-dir data/rss-prof --feeds 500
-uv run python -m profiling.sampling run --mode=cpu  -m podsearch.core.fetch --rss-dir data/rss-prof --feeds 500
-uv run python -m profiling.sampling run --mode=gil  -m podsearch.core.fetch --rss-dir data/rss-prof --feeds 500
+uv run python -m profiling.sampling run --mode=wall -m podsearch.cli.fetch_rss --rss-dir data/rss-prof --feeds 500
+uv run python -m profiling.sampling run --mode=cpu  -m podsearch.cli.fetch_rss --rss-dir data/rss-prof --feeds 500
+uv run python -m profiling.sampling run --mode=gil  -m podsearch.cli.fetch_rss --rss-dir data/rss-prof --feeds 500
 
 # index: model2vec encode — native frames under the Python stack
-uv run python -m profiling.sampling run --native --flamegraph -o results/index-native.html -m podsearch.indexing --vectors data/vectors-prof.f32
+uv run python -m profiling.sampling run --native --flamegraph -o results/index-native.html -m podsearch.cli.indexing --vectors data/vectors-prof.f32
+uv run python -m profiling.sampling run --native --heatmap -o results/index-heat -m podsearch.cli.indexing --vectors data/vectors-prof.f32
 
 # query: a single naive search — "why is this slow?"
-uv run python -m profiling.sampling run --flamegraph -o results/query.html -m podsearch.cli query "startup fundraising advice"
+uv run python -m profiling.sampling run --flamegraph -o results/query.html -m podsearch.cli.query "startup fundraising advice"
 
 # record binary, replay to another format
-uv run python -m profiling.sampling run --binary -o results/ingest.bin -m podsearch.ingest --db data/corpus-prof.db
+uv run python -m profiling.sampling run --binary -o results/ingest.bin -m podsearch.cli.ingest --db data/corpus-prof.db
 uv run python -m profiling.sampling replay --flamegraph -o results/ingest-replay.html results/ingest.bin
 ```
 
@@ -171,11 +172,11 @@ uv run python -m profiling.sampling attach --async-aware -d 20 $PID # with load 
 
 ```bash
 # deterministic profiler (formerly cProfile)
-uv run python -m profiling.tracing -o results/trace.pstats -m podsearch.ingest --db data/corpus-prof.db
-uv run python -m cProfile -s cumtime -m podsearch.ingest --db data/corpus-prof.db | head -30
+uv run python -m profiling.tracing -o results/trace.pstats -m podsearch.cli.ingest --db data/corpus-prof.db
+uv run python -m cProfile -s cumtime -m podsearch.cli.ingest --db data/corpus-prof.db | head -30
 
 # py-spy (third-party; also attach-capable)
-uvx py-spy record -o results/pyspy.svg -- uv run python -m podsearch.ingest --db data/corpus-prof.db
+uvx py-spy record -o results/pyspy.svg -- uv run python -m podsearch.cli.ingest --db data/corpus-prof.db
 uvx py-spy top --pid $PID
 ```
 
@@ -189,7 +190,7 @@ task ingest     # parse RSS into corpus.db
 task index      # build vectors.f32
 task pipeline   # run the pipeline once via Dagu
 task dagu       # Dagu web UI on :8081
-task bench      # = uv run podsearch bench
+task bench      # = uv run podsearch-bench
 task serve      # = uv run podsearch-serve
 task load       # = uv run podsearch-load
 ```
@@ -201,10 +202,8 @@ task load       # = uv run podsearch-load
 - `podsearch/core/fetch.py` — idempotent RSS fetch -> parquet parts, `parse_feed`
 - `podsearch/core/corpus.py` — `strip_html`, `chunk`, corpus.db schema, `ingest_parts`
 - `podsearch/core/index.py` — `build_index`, `search` (naive), `search_numpy`, hit hydration
-- `podsearch/ingest.py` — stage-3 entrypoint
-- `podsearch/indexing.py` — stage-4 entrypoint
 - `podsearch/api.py` — FastAPI `/search`, `/search-async` (blocks the event loop), `/health`
-- `podsearch/cli.py` — `query` / `bench`
-- `podsearch/load.py` — threaded load generator
+- `podsearch/cli/` — one entrypoint module per `podsearch-*` console script:
+  `catalog`, `fetch_rss`, `ingest`, `indexing` (stages 1-4), `serve`, `load`, `query`, `bench`
 - `podsearch/queries.txt` — 20 queries used by `bench` and `load.py`
 - `tests/` — unit tests for corpus, fetch, and index helpers

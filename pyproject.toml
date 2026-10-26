@@ -16,13 +16,14 @@ dependencies = [
 ]
 
 [project.scripts]
-podsearch = "podsearch.cli:main"
-podsearch-catalog = "podsearch.core.catalog:main"
-podsearch-fetch-rss = "podsearch.core.fetch:main"
-podsearch-ingest = "podsearch.ingest:main"
-podsearch-index = "podsearch.indexing:main"
-podsearch-serve = "podsearch.api:main"
-podsearch-load = "podsearch.load:main"
+podsearch-catalog = "podsearch.cli.catalog:main"
+podsearch-fetch-rss = "podsearch.cli.fetch_rss:main"
+podsearch-ingest = "podsearch.cli.ingest:main"
+podsearch-index = "podsearch.cli.indexing:main"
+podsearch-serve = "podsearch.cli.serve:main"
+podsearch-load = "podsearch.cli.load:main"
+podsearch-query = "podsearch.cli.query:main"
+podsearch-bench = "podsearch.cli.bench:main"
 
 [dependency-groups]
 dev = [

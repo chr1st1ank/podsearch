@@ -1,6 +1,5 @@
 """Stage 1: fetch the Podcast Index feed catalog and select feeds to crawl."""
 
-import argparse
 import sqlite3
 import tarfile
 import tempfile
@@ -113,23 +112,3 @@ def select_feeds(
     finally:
         conn.close()
     return [dict(row) for row in rows]
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        prog="podsearch-catalog",
-        description="Download and extract the Podcast Index feed catalog.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument("--db", type=Path, default=CATALOG_DB, help="catalog SQLite database path")
-    parser.add_argument("--url", default=CATALOG_URL, help="catalog dump URL to download")
-    args = parser.parse_args()
-    db = ensure_db(args.db, args.url)
-    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-    count = conn.execute("SELECT COUNT(*) FROM podcasts").fetchone()[0]
-    conn.close()
-    print(f"{count:,} feeds in catalog")
-
-
-if __name__ == "__main__":
-    main()
