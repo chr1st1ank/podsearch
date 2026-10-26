@@ -9,7 +9,7 @@ Semantic search over podcast episodes, built to be profiled. Three search implem
 - `qdrant`: Qdrant server in Docker (`qdrant_store.search`) — same fused layout as lancedb,
   vectors + payload in one collection, server-side HNSW
 
-Model: `model2vec` static embedding `minishlab/potion-base-8M` (256 dims, downloads 30 MB
+Model: `model2vec` static embedding `minishlab/potion-multilingual-128M` (256 dims, downloads ~500 MB
 from Hugging Face on first use, cached afterwards). Corpus: podcast episodes selected from
 the Podcast Index catalog and fetched via RSS. Index: `data/vectors.f32` (raw float32 matrix,
 memory-mapped) + `data/corpus.db` (SQLite: episodes, chunks, ingest bookkeeping).

@@ -108,3 +108,15 @@ to point into drafts/).
   retries them — intentional for transient errors).
 - A copied `.venv` once had stale script shebangs pointing at the old drafts env;
   `uv sync --reinstall` fixes them.
+
+## Known issues / TODO
+
+- **Duplicate chunks and duplicate hits** (to investigate): `corpus.chunk` starts a new window
+  every `size - overlap` (160) words even when the previous window already reached the end of
+  the text, so e.g. a 210-word text yields a 50-word tail chunk fully contained in chunk 1.
+  Repeated feed items/near-identical feeds (e.g. "Epoch Im Fokus" vs "Epoch Im Fokus +", same
+  episode listed 3x in qdrant results for "Politik verstehen…") add to this. Goals: (1) avoid
+  creating duplicate/redundant chunks (stop when the window covers the end; dedup identical
+  chunk text per episode/guid), (2) filter duplicate hits at query time (dedup per episode,
+  keep best-scoring chunk) across all backends (naive|numpy|lancedb|qdrant).
+- Lancedb returns cosine *distance*, qdrant cosine *similarity*; printed scores not comparable.

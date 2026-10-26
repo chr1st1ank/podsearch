@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     import numpy as np
     from model2vec import StaticModel
 
-MODEL_NAME = "minishlab/potion-base-8M"
+MODEL_NAME = "minishlab/potion-multilingual-128M"
 MAX_CHUNKS_PER_EPISODE = 3
 ENCODE_BATCH = 512
 

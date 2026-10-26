@@ -94,7 +94,7 @@ def catalog(CATALOG_DB, mo, pl, sqlite3):
         _conn = sqlite3.connect(f"file:{CATALOG_DB}?mode=ro", uri=True)
         df = pl.read_database(
             "SELECT id, title, url, language, episodeCount, lastUpdate,"
-            " popularityScore FROM podcasts",
+            " newestItemPubdate, popularityScore FROM podcasts",
             _conn,
         )
         _conn.close()
@@ -113,6 +113,54 @@ def catalog(CATALOG_DB, mo, pl, sqlite3):
 @app.cell
 def _(df, pl):
     df.group_by(pl.col("language")).len().sort(pl.col("len"), descending=True).head(10)
+    return
+
+
+@app.cell
+def feeds_controls(mo):
+    feed_order = mo.ui.dropdown(
+        options=["recent", "episodes", "popularity"], value="recent", label="--order"
+    )
+    feed_min_eps = mo.ui.number(start=0, value=20, label="--min-episodes")
+    feed_langs = mo.ui.text(value="en,de", label="--lang")
+    mo.vstack([feed_order, feed_min_eps, feed_langs])
+    return feed_langs, feed_min_eps, feed_order
+
+
+@app.cell
+def feeds_scaling(df, feed_langs, feed_min_eps, feed_order, mo, pl):
+    """Cumulative episodes `catalog.select_feeds` would yield as --feeds grows."""
+    _sort_by = {
+        "recent": ["newestItemPubdate"],
+        "episodes": ["episodeCount"],
+        "popularity": ["popularityScore", "newestItemPubdate"],
+    }[feed_order.value]
+    _langs = [lang.strip().lower() for lang in feed_langs.value.split(",") if lang.strip()]
+    _cum = (
+        df.filter(
+            pl.col("episodeCount") >= feed_min_eps.value,
+            pl.any_horizontal(
+                pl.lit(not _langs),
+                *(pl.col("language").str.to_lowercase().str.starts_with(lang) for lang in _langs),
+            ),
+        )
+        .sort(_sort_by, descending=True, nulls_last=True)["episodeCount"]
+        .cum_sum()
+    )
+    mo.stop(_cum.is_empty(), mo.md("_no feeds match these filters_"))
+    _steps = [s for s in (10, 100, 1_000, 10_000, 100_000, 1_000_000) if s < len(_cum)]
+    _steps.append(len(_cum))
+    mo.vstack(
+        [
+            mo.md(f"## episodes vs `--feeds` — {len(_cum):,} eligible feeds"),
+            pl.DataFrame(
+                {"feeds": _steps, "episodes": _cum.gather([s - 1 for s in _steps])}
+            ).with_columns(
+                (pl.col("episodes") / pl.col("feeds")).round(1).alias("episodes/feed"),
+                (pl.col("episodes") / _cum[-1] * 100).round(1).alias("% of eligible"),
+            ),
+        ]
+    )
     return
 
 
