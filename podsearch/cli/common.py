@@ -51,8 +51,10 @@ def stats(impl: str, store: Any) -> dict[str, int | None]:
             eps = store.search().select(["feed_url", "guid"]).to_polars().unique().height
             return {"episodes": eps, "chunks": store.count_rows()}
         case "qdrant":
-            # no cheap distinct-count over payloads; report chunks only
-            return {"episodes": None, "chunks": store.count(qdrant_store.CHUNKS_COLLECTION).count}
+            return {
+                "episodes": qdrant_store.episode_count(store),
+                "chunks": store.count(qdrant_store.CHUNKS_COLLECTION).count,
+            }
         case _:
             eps = store.conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
             return {"episodes": eps, "chunks": int(store.vectors.shape[0])}

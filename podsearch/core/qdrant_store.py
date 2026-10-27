@@ -53,6 +53,13 @@ def _ensure_collections(client: QdrantClient, dim: int) -> None:
             optimizers_config=models.OptimizersConfigDiff(indexing_threshold=0),
         )
         client.create_payload_index(CHUNKS_COLLECTION, "feed_url", models.PayloadSchemaType.KEYWORD)
+        client.create_payload_index(CHUNKS_COLLECTION, "guid", models.PayloadSchemaType.KEYWORD)
+
+
+def episode_count(client: QdrantClient) -> int:
+    """Distinct guid count via facet on the guid payload index."""
+    n = client.count(CHUNKS_COLLECTION).count
+    return len(client.facet(CHUNKS_COLLECTION, key="guid", limit=max(n, 1)).hits)
 
 
 def _ensure_parts(client: QdrantClient) -> None:
