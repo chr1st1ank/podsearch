@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon"
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8E%99%3C/text%3E%3C/svg%3E">
+  <title>podsearch</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+    }
+
+    body {
+      font-family: system-ui, sans-serif;
+      box-sizing: border-box;
+      max-width: 44rem;
+      min-height: 100dvh;
+      margin: 0 auto;
+      padding: 2rem 1rem;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      text-align: center;
+      margin: auto 0 2rem;
+    }
+
+    /* auto margins center the block; once results overflow they collapse to 0 */
+    #results {
+      margin-bottom: auto;
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin: 0;
+    }
+
+    #info {
+      color: #888;
+      font-size: .85rem;
+      margin: .4rem 0 0;
+      min-height: 1.2em;
+    }
+
+    form {
+      display: flex;
+      gap: .5rem;
+    }
+
+    input[type=search] {
+      flex: 1;
+      padding: .7rem 1.1rem;
+      font-size: 1.05rem;
+      color: inherit;
+      background: transparent;
+      border: 1px solid #9995;
+      border-radius: 999px;
+    }
+
+    input[type=search]:focus {
+      outline: 2px solid #4f8ef7;
+      outline-offset: -1px;
+      border-color: transparent;
+    }
+
+    button {
+      padding: .7rem 1.4rem;
+      font-size: 1.05rem;
+      border: none;
+      border-radius: 999px;
+      background: #4f8ef7;
+      color: #fff;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #3f7de0;
+    }
+
+    #status {
+      color: #888;
+      font-size: .85rem;
+      margin: .9rem .2rem;
+      min-height: 1.2em;
+    }
+
+    .hit {
+      padding: .9rem 0;
+      border-bottom: 1px solid #9993;
+    }
+
+    .hit:last-child {
+      border-bottom: none;
+    }
+
+    .hit a {
+      font-size: 1.05rem;
+      text-decoration: none;
+    }
+
+    .hit a:hover {
+      text-decoration: underline;
+    }
+
+    .meta {
+      color: #888;
+      font-size: .82rem;
+      margin-top: .15rem;
+    }
+
+    .snippet {
+      margin: .35rem 0 0;
+      opacity: .85;
+      font-size: .92rem;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>🎙 podsearch</h1>
+    <p id="info"></p>
+  </header>
+  <form id="f">
+    <input type="search" id="q" placeholder="Search podcast episodes…" autofocus required>
+    <button type="submit">Search</button>
+  </form>
+  <p id="status"></p>
+  <div id="results"></div>
+  <script>
+    const form = document.getElementById('f');
+    const input = document.getElementById('q');
+    const status = document.getElementById('status');
+    const results = document.getElementById('results');
+    const fmt = n => n.toLocaleString('en-US');
+
+    fetch('/api/stats')
+      .then(r => r.json())
+      .then(i => {
+        const parts = [i.impl];
+        if (i.episodes != null) parts.push(`${fmt(i.episodes)} episodes`);
+        parts.push(`${fmt(i.chunks)} chunks`);
+        document.getElementById('info').textContent = parts.join(' · ');
+      })
+      .catch(() => { });
+
+    async function runSearch(q) {
+      results.replaceChildren();
+      status.textContent = 'searching…';
+      const t0 = performance.now();
+      try {
+        const r = await fetch('/search?q=' + encodeURIComponent(q) + '&k=10');
+        const hits = await r.json();
+        const secs = ((performance.now() - t0) / 1000).toFixed(2);
+        status.textContent = `${hits.length} hits in ${secs} s`;
+        for (const h of hits) {
+          const div = document.createElement('div');
+          div.className = 'hit';
+          const a = document.createElement('a');
+          a.href = h.link; a.textContent = h.episode;
+          const meta = document.createElement('div');
+          meta.className = 'meta';
+          const date = h.pubdate ? new Date(h.pubdate * 1000).toLocaleDateString() : '';
+          meta.textContent = [h.podcast, date, `score ${h.score.toFixed(3)}`].filter(Boolean).join(' · ');
+          const snip = document.createElement('p');
+          snip.className = 'snippet'; snip.textContent = h.snippet;
+          div.append(a, meta, snip);
+          results.append(div);
+        }
+      } catch (err) {
+        status.textContent = 'search failed: ' + err;
+      }
+    }
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const q = input.value.trim();
+      if (!q) return;
+      if (new URLSearchParams(location.search).get('q') !== q)
+        history.pushState(null, '', '?q=' + encodeURIComponent(q));
+      runSearch(q);
+    });
+
+    window.addEventListener('popstate', () => {
+      const q = new URLSearchParams(location.search).get('q') ?? '';
+      input.value = q;
+      if (q) {
+        runSearch(q);
+      } else {
+        results.replaceChildren();
+        status.textContent = '';
+      }
+    });
+
+    const q0 = new URLSearchParams(location.search).get('q');
+    if (q0) {
+      input.value = q0;
+      runSearch(q0);
+    }
+  </script>
+</body>
+
+</html>

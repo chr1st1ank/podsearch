@@ -96,7 +96,7 @@ tasks:
   serve:
     desc: Run the FastAPI service on :8000 (attach target)
     cmds:
-      - uv run podsearch-serve
+      - uv run podsearch-serve {{.CLI_ARGS}}
 
   load:
     desc: Generate load against the service
