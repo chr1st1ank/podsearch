@@ -177,7 +177,7 @@ def ingest_parts(
 
 def search(client: QdrantClient, model, reranker, q: str, k: int = 5) -> list[Hit]:
     """Vector search; payload carries all metadata so hits need no hydration."""
-    vec = [float(x) for x in model.encode([q])[0]]
+    vec = [float(x) for x in model.encode_query([q])[0]]
     res = client.query_points(
         CHUNKS_COLLECTION, query=vec, limit=index.rerank_limit(k), with_payload=True
     )

@@ -11,10 +11,9 @@ from podsearch.core.paths import CORPUS_DB, VECTORS_PATH
 
 if TYPE_CHECKING:
     import numpy as np
-    from model2vec import StaticModel
     from sentence_transformers import CrossEncoder
 
-MODEL_NAME = "minishlab/potion-multilingual-128M"
+MODEL_NAME = "intfloat/multilingual-e5-small"
 RERANK_MODEL_NAME = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
 MAX_CHUNKS_PER_EPISODE = 3
 ENCODE_BATCH = 512
@@ -29,10 +28,23 @@ def rerank_limit(k: int) -> int:
     return max(k * SEARCH_OVERFETCH, MIN_RERANK_CANDIDATES)
 
 
-def load_model() -> StaticModel:
-    from model2vec import StaticModel
+class E5Encoder:
+    """multilingual-e5 encoder; E5 retrievers require input prefixes."""
 
-    return StaticModel.from_pretrained(MODEL_NAME)
+    def __init__(self, name: str = MODEL_NAME) -> None:
+        from sentence_transformers import SentenceTransformer
+
+        self._model = SentenceTransformer(name)
+
+    def encode(self, texts: list[str]) -> np.ndarray:
+        return self._model.encode([f"passage: {t}" for t in texts])
+
+    def encode_query(self, texts: list[str]) -> np.ndarray:
+        return self._model.encode([f"query: {t}" for t in texts])
+
+
+def load_model() -> E5Encoder:
+    return E5Encoder()
 
 
 def load_reranker() -> CrossEncoder:
@@ -204,7 +216,7 @@ def rerank(reranker, query: str, hits: list[Hit], k: int) -> list[Hit]:
 
 def search(index: Index, model, reranker, query: str, k: int = 5) -> list[Hit]:
     """Score every chunk with cosine similarity and return the best k."""
-    q = model.encode([query])[0].tolist()
+    q = model.encode_query([query])[0].tolist()
     scored = [(_cosine(q, v), i) for i, v in enumerate(index.vectors)]
     scored.sort(reverse=True)
     candidates = _hydrate(index, scored[: rerank_limit(k)])
@@ -221,7 +233,7 @@ def search_numpy(index: Index, model, reranker, query: str, k: int = 5) -> list[
         norms = np.linalg.norm(m, axis=1, keepdims=True)
         matrix = np.divide(m, norms, out=np.zeros(m.shape, dtype=np.float32), where=norms > 0)
         index._norm = matrix
-    q = model.encode([query])[0].astype(np.float32)
+    q = model.encode_query([query])[0].astype(np.float32)
     nq = np.linalg.norm(q)
     if nq:
         q /= nq

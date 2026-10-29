@@ -10,8 +10,12 @@ between Phase 2 (research, mostly done) and Phase 3 (storyline). Drafts live in 
 ## User decisions so far
 
 - Example = hook, not an optimization exercise: **only ONE improvement round**.
-- Example: podcast-episode semantic search over real RSS data with **local** model2vec
-  embeddings (`minishlab/potion-base-8M`, 256-dim). No LLM calls. Replaced the earlier
+- Example: podcast-episode semantic search over real RSS data with **local** embeddings
+  (`intfloat/multilingual-e5-small`, 384-dim, via sentence-transformers). No LLM calls.
+  (Started on model2vec `potion-*` static embeddings; swapped because static
+  bag-of-subword vectors broke cross-language retrieval and German compounds
+  like "Islandpferde" -> island episodes. `tests/test_retrieval.py` guards this.)
+  Replaced the earlier
   "Ask the PEPs" idea — that corpus was too small to produce a real performance problem.
 - Full-size corpus is the point: hundreds of thousands of episodes so the naive search
   loop is genuinely slow (target ~15-25 s/query vs ~0.3 s at the old 12.6k-chunk scale).
@@ -55,8 +59,9 @@ naive is seconds-to-tens-of-seconds per query at scale.
 
 ## What exists (verified on Python 3.15.0)
 
-- flat-layout uv/hatchling project (`podsearch/` at root, editable install). Deps: model2vec,
-  fastapi, uvicorn, httpx, feedparser, feedparser-rs, pyarrow, polars, lancedb.
+- flat-layout uv/hatchling project (`podsearch/` at root, editable install). Deps:
+  sentence-transformers, fastapi, uvicorn, httpx, feedparser, feedparser-rs, pyarrow,
+  polars, lancedb.
   `task check` = ruff + ty (all error) + pytest.
 - `podsearch/core/{paths,catalog,fetch,corpus,index,lance_store}.py` (pure lib),
   `podsearch/api.py` (FastAPI app), `podsearch/cli/{catalog,fetch_rss,ingest,indexing,

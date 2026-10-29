@@ -9,8 +9,8 @@ Semantic search over podcast episodes, built to be profiled. Three search implem
 - `qdrant`: Qdrant server in Docker (`qdrant_store.search`) — same fused layout as lancedb,
   vectors + payload in one collection, server-side HNSW
 
-Model: `model2vec` static embedding `minishlab/potion-multilingual-128M` (256 dims, downloads ~500 MB
-from Hugging Face on first use, cached afterwards). Corpus: podcast episodes selected from
+Model: `intfloat/multilingual-e5-small` via sentence-transformers (384 dims, `query:`/`passage:`
+prefixes; downloads ~470 MB from Hugging Face on first use, cached afterwards). Corpus: podcast episodes selected from
 the Podcast Index catalog and fetched via RSS. Index: `data/vectors.f32` (raw float32 matrix,
 memory-mapped) + `data/corpus.db` (SQLite: episodes, chunks, ingest bookkeeping).
 
@@ -174,7 +174,7 @@ uv run python -m profiling.sampling run --mode=wall -m podsearch.cli.fetch_rss -
 uv run python -m profiling.sampling run --mode=cpu  -m podsearch.cli.fetch_rss --rss-dir data/rss-prof --feeds 500
 uv run python -m profiling.sampling run --mode=gil  -m podsearch.cli.fetch_rss --rss-dir data/rss-prof --feeds 500
 
-# index: model2vec encode — native frames under the Python stack
+# index: e5 encode — native frames under the Python stack
 uv run python -m profiling.sampling run --native --flamegraph -o results/index-native.html -m podsearch.cli.indexing --vectors data/vectors-prof.f32
 uv run python -m profiling.sampling run --native --heatmap -o results/index-heat -m podsearch.cli.indexing --vectors data/vectors-prof.f32
 

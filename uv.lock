@@ -580,24 +580,6 @@ wheels = [
 ]
 
 [[package]]
-name = "model2vec"
-version = "0.10.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "huggingface-hub" },
-    { name = "jinja2" },
-    { name = "joblib" },
-    { name = "numpy" },
-    { name = "safetensors" },
-    { name = "tokenizers" },
-    { name = "tqdm" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/04/48/2ceace43798ca7cb8c32c50c7956d7446d7f90a3b3f65b201fb7fd87344c/model2vec-0.10.0.tar.gz", hash = "sha256:47119ef1f917b4da7a0010bf10c587c923639a6af4ea51cb2d424fc329d09d2f", size = 4622501, upload-time = "2026-10-11T10:47:59.266Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/84/c5/2b1b5648195bfcada5de6a1164d560c968ded8fc68f2ddd6118b21cb26b7/model2vec-0.10.0-py3-none-any.whl", hash = "sha256:a39c40de4f82c5e0e50c14bbb87a935c1c62094f3f0f0d8fde8e24f4a4f35b16", size = 89504, upload-time = "2026-10-11T10:47:57.679Z" },
-]
-
-[[package]]
 name = "mpmath"
 version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -709,7 +691,6 @@ dependencies = [
     { name = "feedparser-rs" },
     { name = "httpx" },
     { name = "lancedb" },
-    { name = "model2vec" },
     { name = "polars" },
     { name = "pyarrow" },
     { name = "qdrant-client" },
@@ -738,7 +719,6 @@ requires-dist = [
     { name = "feedparser-rs", specifier = ">=0.7.1" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "lancedb", specifier = ">=0.40,<1" },
-    { name = "model2vec", specifier = ">=0.5" },
     { name = "polars", specifier = ">=2.0.0" },
     { name = "pyarrow", specifier = ">=18.0" },
     { name = "qdrant-client", specifier = ">=1.20.0" },

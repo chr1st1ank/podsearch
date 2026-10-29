@@ -324,7 +324,7 @@ def lancedb(LANCE_DIR, lance_store, mo, n, pl, rng, seed_int, shorten):
 
 @app.cell
 def lance_model(index):
-    """Cached model2vec loader so repeated searches don't reload."""
+    """Cached embedding-model loader so repeated searches don't reload."""
     from functools import cache
 
     load = cache(index.load_model)

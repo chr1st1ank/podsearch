@@ -170,7 +170,7 @@ def ingest_parts(
 
 def search(tbl: Table, model, reranker, q: str, k: int = 5) -> list[Hit]:
     """Vector search; rows carry all metadata so hits need no hydration."""
-    q_vec = np.asarray(model.encode([q])[0], dtype=np.float32)
+    q_vec = np.asarray(model.encode_query([q])[0], dtype=np.float32)
     # stubs type search() as LanceQueryBuilder; a vector query yields the
     # vector builder that has .metric()
     builder = cast("LanceVectorQueryBuilder", tbl.search(q_vec))

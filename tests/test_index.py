@@ -18,6 +18,8 @@ class FakeModel:
     def encode(self, texts: list[str]) -> np.ndarray:
         return np.tile(np.asarray(self.vec, dtype=np.float32), (len(texts), 1))
 
+    encode_query = encode
+
 
 class KeywordReranker:
     """Scores (query, passage) pairs by whether `keyword` appears in the passage."""
@@ -118,6 +120,8 @@ class ZeroVecModel:
             dtype=np.float32,
         )
 
+    encode_query = encode
+
 
 def test_search_numpy_zero_norm_rows(tmp_path) -> None:
     db = tmp_path / "corpus.db"
@@ -197,4 +201,35 @@ def test_search_from_worker_thread(tmp_path) -> None:
         for fn in (index.search, index.search_numpy):
             hits = pool.submit(fn, idx, model, FakeReranker(), "q").result()
             assert len(hits) == 2
+    idx.conn.close()
+
+
+class RecordingModel:
+    """Records which encode path was taken - locks the query/passage split."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def encode(self, texts: list[str]) -> np.ndarray:
+        self.calls.append("encode")
+        return np.tile(np.asarray([1.0, 0.0], dtype=np.float32), (len(texts), 1))
+
+    def encode_query(self, texts: list[str]) -> np.ndarray:
+        self.calls.append("encode_query")
+        return np.tile(np.asarray([1.0, 0.0], dtype=np.float32), (len(texts), 1))
+
+
+def test_search_uses_query_encoder(tmp_path) -> None:
+    """E5-style models need a query prefix; searches must call encode_query."""
+    db = tmp_path / "corpus.db"
+    vectors = tmp_path / "vectors.f32"
+    conn = _tiny_corpus(db)
+    index.build_index(conn, FakeModel([1.0, 0.0]), vectors)
+    conn.close()
+
+    idx = index.load(vectors, db)
+    for fn in (index.search, index.search_numpy):
+        model = RecordingModel()
+        fn(idx, model, FakeReranker(), "q", k=1)
+        assert model.calls == ["encode_query"]
     idx.conn.close()

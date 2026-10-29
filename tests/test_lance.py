@@ -21,6 +21,8 @@ class FakeModel:
     def encode(self, texts: list[str]) -> np.ndarray:
         return np.tile(np.asarray([1.0, 0.0], dtype=np.float32), (len(texts), 1))
 
+    encode_query = encode
+
 
 class FakeReranker:
     """Fixed cross-encoder scores - no model download."""
