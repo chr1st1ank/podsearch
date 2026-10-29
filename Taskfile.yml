@@ -80,6 +80,7 @@ tasks:
     env:
       PODSEARCH_DIR: "{{.ROOT_DIR}}"
       DAGU_AUTH_MODE: "none"
+      DAGU_DATA_DIR: "{{.ROOT_DIR}}/data/dagu"
     cmds:
       - mise exec -- dagu start-all --dags orchestration --port 8081 {{.CLI_ARGS}}
 
