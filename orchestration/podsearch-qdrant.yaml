@@ -13,10 +13,10 @@ defaults:
 
 params:
   - name: FEEDS
-    default: "10000"
+    default: "40000"
     description: Number of feeds to fetch (podsearch-fetch-rss --feeds)
   - name: LANG
-    default: "de"
+    default: "de,en"
     # default: "de,en"  # de + en (the CLI default)
     description: Comma-separated feed languages (podsearch-fetch-rss --lang)
 
