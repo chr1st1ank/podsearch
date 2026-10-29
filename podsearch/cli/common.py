@@ -30,7 +30,7 @@ def open_store(impl: str, lance_dir: Path | None = None, qdrant_url: str | None 
             raise ValueError(f"unknown impl: {impl}")
 
 
-def search_fn(impl: str) -> Callable[[Any, Any, str, int], list[index.Hit]]:
+def search_fn(impl: str) -> Callable[[Any, Any, Any, str, int], list[index.Hit]]:
     match impl:
         case "naive":
             return index.search

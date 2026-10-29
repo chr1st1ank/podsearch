@@ -175,26 +175,24 @@ def ingest_parts(
     return stats
 
 
-def search(client: QdrantClient, model, q: str, k: int = 5) -> list[Hit]:
+def search(client: QdrantClient, model, reranker, q: str, k: int = 5) -> list[Hit]:
     """Vector search; payload carries all metadata so hits need no hydration."""
     vec = [float(x) for x in model.encode([q])[0]]
     res = client.query_points(
-        CHUNKS_COLLECTION, query=vec, limit=k * index.SEARCH_OVERFETCH, with_payload=True
+        CHUNKS_COLLECTION, query=vec, limit=index.rerank_limit(k), with_payload=True
     )
-    return index.dedup_hits(
-        [
-            Hit(
-                podcast=p.payload["podcast"],
-                episode=p.payload["episode"],
-                score=p.score,
-                snippet=p.payload["text"][:200],
-                link=p.payload["link"],
-                pubdate=p.payload["pubdate"],
-                feed_url=p.payload["feed_url"],
-                guid=p.payload["guid"],
-            )
-            for p in res.points
-            if p.payload is not None
-        ],
-        k,
-    )
+    candidates = [
+        Hit(
+            podcast=p.payload["podcast"],
+            episode=p.payload["episode"],
+            score=p.score,
+            snippet=p.payload["text"],  # full chunk text; rerank() truncates to [:200]
+            link=p.payload["link"],
+            pubdate=p.payload["pubdate"],
+            feed_url=p.payload["feed_url"],
+            guid=p.payload["guid"],
+        )
+        for p in res.points
+        if p.payload is not None
+    ]
+    return index.rerank(reranker, q, candidates, k)

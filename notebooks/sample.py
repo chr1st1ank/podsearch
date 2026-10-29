@@ -328,7 +328,8 @@ def lance_model(index):
     from functools import cache
 
     load = cache(index.load_model)
-    return (load,)
+    load_reranker = cache(index.load_reranker)
+    return load, load_reranker
 
 
 @app.cell
@@ -340,10 +341,10 @@ def lance_query(mo):
 
 
 @app.cell
-def lance_search(lance_store, lance_tbl, load, mo, pl, query, run, shorten):
+def lance_search(lance_store, lance_tbl, load, load_reranker, mo, pl, query, run, shorten):
     mo.stop(lance_tbl is None, mo.md("_no lancedb store_"))
     mo.stop(not run.value, mo.md("_press search_"))
-    _hits = lance_store.search(lance_tbl, load(), query.value, k=10)
+    _hits = lance_store.search(lance_tbl, load(), load_reranker(), query.value, k=10)
     mo.vstack(
         [
             mo.md(f"### hits for `{query.value}`"),

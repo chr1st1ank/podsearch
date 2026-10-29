@@ -22,6 +22,13 @@ class FakeModel:
         return np.tile(np.asarray([1.0, 0.0], dtype=np.float32), (len(texts), 1))
 
 
+class FakeReranker:
+    """Fixed cross-encoder scores - no model download."""
+
+    def predict(self, pairs: list[list[str]]) -> np.ndarray:
+        return np.ones(len(pairs), dtype=np.float32)
+
+
 def _write_part(
     rss_dir, seq: int, feed_url: str, title: str, fetch_date: int, desc: str = "alpha beta gamma"
 ) -> None:
@@ -47,7 +54,7 @@ def test_ingest_and_search_roundtrip(tmp_path) -> None:
     assert stats["chunks"] > 0
 
     tbl = lance_store.open_chunks(lance_dir)
-    hits = lance_store.search(tbl, FakeModel(), "query", k=5)
+    hits = lance_store.search(tbl, FakeModel(), FakeReranker(), "query", k=5)
     assert len(hits) == 1
     assert hits[0].score == pytest.approx(1.0)
     assert hits[0].podcast == "Pod A"
@@ -64,7 +71,9 @@ def test_search_dedups_chunks_of_one_episode(tmp_path) -> None:
     stats = lance_store.ingest_parts(FakeModel(), rss_dir=rss_dir, path=lance_dir)
     assert stats["chunks"] == 2
 
-    hits = lance_store.search(lance_store.open_chunks(lance_dir), FakeModel(), "query", k=5)
+    hits = lance_store.search(
+        lance_store.open_chunks(lance_dir), FakeModel(), FakeReranker(), "query", k=5
+    )
     assert [h.episode for h in hits] == ["Episode one"]
 
 
@@ -83,7 +92,7 @@ def test_ingest_idempotent_and_replace(tmp_path) -> None:
     stats = lance_store.ingest_parts(FakeModel(), rss_dir=rss_dir, path=lance_dir)
     assert stats["parts"] == 1
     tbl = lance_store.open_chunks(lance_dir)
-    hits = lance_store.search(tbl, FakeModel(), "query", k=5)
+    hits = lance_store.search(tbl, FakeModel(), FakeReranker(), "query", k=5)
     assert [h.episode for h in hits] == ["Episode one v2"]
 
 
@@ -96,5 +105,7 @@ def test_rebuild_reingests_everything(tmp_path) -> None:
     lance_store.ingest_parts(FakeModel(), rss_dir=rss_dir, path=lance_dir)
     stats = lance_store.ingest_parts(FakeModel(), rss_dir=rss_dir, path=lance_dir, rebuild=True)
     assert stats["parts"] == 1
-    hits = lance_store.search(lance_store.open_chunks(lance_dir), FakeModel(), "query")
+    hits = lance_store.search(
+        lance_store.open_chunks(lance_dir), FakeModel(), FakeReranker(), "query"
+    )
     assert len(hits) == 1

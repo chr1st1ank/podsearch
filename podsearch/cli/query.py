@@ -26,7 +26,8 @@ def main() -> None:
 
     store = common.open_store(args.impl, args.lance_dir, args.qdrant_url)
     model = index.load_model()
-    hits = common.search_fn(args.impl)(store, model, args.q, args.k)
+    reranker = index.load_reranker()
+    hits = common.search_fn(args.impl)(store, model, reranker, args.q, args.k)
     for hit in sorted(hits, key=lambda h: h.score, reverse=True):
         print(common.fmt_hit(hit))
 

@@ -19,6 +19,7 @@ def create_app(impl: str = "naive") -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         app.state.store = common.open_store(impl)
         app.state.model = index.load_model()
+        app.state.reranker = index.load_reranker()
         stats = common.stats(impl, app.state.store)
         app.state.info = {"impl": impl, **stats}
         eps = f"{stats['episodes']:,}" if stats["episodes"] is not None else "?"
@@ -51,10 +52,14 @@ def create_app(impl: str = "naive") -> FastAPI:
 
     @app.get("/search")
     def search(request: Request, q: str, k: int = 5) -> list[index.Hit]:
-        return search_fn(request.app.state.store, request.app.state.model, q, k)
+        return search_fn(
+            request.app.state.store, request.app.state.model, request.app.state.reranker, q, k
+        )
 
     @app.get("/search-async")
     async def search_async(request: Request, q: str, k: int = 5) -> list[index.Hit]:
-        return search_fn(request.app.state.store, request.app.state.model, q, k)
+        return search_fn(
+            request.app.state.store, request.app.state.model, request.app.state.reranker, q, k
+        )
 
     return app

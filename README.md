@@ -14,6 +14,14 @@ from Hugging Face on first use, cached afterwards). Corpus: podcast episodes sel
 the Podcast Index catalog and fetched via RSS. Index: `data/vectors.f32` (raw float32 matrix,
 memory-mapped) + `data/corpus.db` (SQLite: episodes, chunks, ingest bookkeeping).
 
+Every search is two-stage retrieve + rerank: the vector search overfetches
+`max(6k, 30)` candidate chunks, then a cross-encoder
+(`cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` via sentence-transformers; ~470 MB HF
+download on first query, cached afterwards) scores `query × (podcast + episode
+title + chunk text)` with sigmoid-normalized scores, and the hits are deduped
+to k episodes. `torch` is pinned to PyTorch's official CPU wheel index
+(`[[tool.uv.index]] pytorch-cpu`) because PyPI has no `cp315` Linux wheels yet.
+
 ## Data pipeline
 
 Four independent stages — each is its own script (and `python -m` module).
@@ -233,7 +241,7 @@ task load       # = uv run podsearch-load
 - `podsearch/core/catalog.py` — catalog download + feed selection SQL
 - `podsearch/core/fetch.py` — idempotent RSS fetch -> parquet parts, `parse_feed`
 - `podsearch/core/corpus.py` — `strip_html`, `chunk`, corpus.db schema, `ingest_parts`
-- `podsearch/core/index.py` — `build_index`, `search` (naive), `search_numpy`, hit hydration
+- `podsearch/core/index.py` — `build_index`, `search` (naive), `search_numpy`, `rerank` (cross-encoder), hit hydration
 - `podsearch/core/lance_store.py` — fused ingest+index + `search` for `--impl lancedb`
 - `podsearch/core/qdrant_store.py` — fused ingest+index + `search` for `--impl qdrant`
 - `podsearch/core/ingest_common.py` — chunking/embedding helpers shared by both fused stores

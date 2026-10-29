@@ -168,26 +168,24 @@ def ingest_parts(
     return stats
 
 
-def search(tbl: Table, model, q: str, k: int = 5) -> list[Hit]:
+def search(tbl: Table, model, reranker, q: str, k: int = 5) -> list[Hit]:
     """Vector search; rows carry all metadata so hits need no hydration."""
     q_vec = np.asarray(model.encode([q])[0], dtype=np.float32)
     # stubs type search() as LanceQueryBuilder; a vector query yields the
     # vector builder that has .metric()
     builder = cast("LanceVectorQueryBuilder", tbl.search(q_vec))
-    rows = builder.metric("cosine").limit(k * index.SEARCH_OVERFETCH).to_list()
-    return index.dedup_hits(
-        [
-            Hit(
-                podcast=r["podcast"],
-                episode=r["episode"],
-                score=0.0 if math.isnan(r["_distance"]) else 1.0 - r["_distance"],
-                snippet=r["text"][:200],
-                link=r["link"],
-                pubdate=r["pubdate"],
-                feed_url=r["feed_url"],
-                guid=r["guid"],
-            )
-            for r in rows
-        ],
-        k,
-    )
+    rows = builder.metric("cosine").limit(index.rerank_limit(k)).to_list()
+    candidates = [
+        Hit(
+            podcast=r["podcast"],
+            episode=r["episode"],
+            score=0.0 if math.isnan(r["_distance"]) else 1.0 - r["_distance"],
+            snippet=r["text"],  # full chunk text; rerank() truncates to [:200]
+            link=r["link"],
+            pubdate=r["pubdate"],
+            feed_url=r["feed_url"],
+            guid=r["guid"],
+        )
+        for r in rows
+    ]
+    return index.rerank(reranker, q, candidates, k)

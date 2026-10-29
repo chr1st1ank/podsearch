@@ -12,19 +12,35 @@ from podsearch.core.paths import CORPUS_DB, VECTORS_PATH
 if TYPE_CHECKING:
     import numpy as np
     from model2vec import StaticModel
+    from sentence_transformers import CrossEncoder
 
 MODEL_NAME = "minishlab/potion-multilingual-128M"
+RERANK_MODEL_NAME = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
 MAX_CHUNKS_PER_EPISODE = 3
 ENCODE_BATCH = 512
 # Hits repeat an episode for several reasons (chunks per episode, republished
 # feeds). Fetch extra candidates so dedup_hits can still return k episodes.
-SEARCH_OVERFETCH = 3
+SEARCH_OVERFETCH = 6
+MIN_RERANK_CANDIDATES = 30
+
+
+def rerank_limit(k: int) -> int:
+    """Number of chunks to retrieve before reranking + deduping to k episodes."""
+    return max(k * SEARCH_OVERFETCH, MIN_RERANK_CANDIDATES)
 
 
 def load_model() -> StaticModel:
     from model2vec import StaticModel
 
     return StaticModel.from_pretrained(MODEL_NAME)
+
+
+def load_reranker() -> CrossEncoder:
+    """Load the cross-encoder reranker (sigmoid-normalized scores in [0, 1])."""
+    import torch
+    from sentence_transformers import CrossEncoder
+
+    return CrossEncoder(RERANK_MODEL_NAME, activation_fn=torch.nn.Sigmoid())
 
 
 @dataclass
@@ -152,7 +168,7 @@ def _hydrate(index: Index, scored: list[tuple[float, int]]) -> list[Hit]:
             podcast=rows[i][2],
             episode=rows[i][3],
             score=float(s),
-            snippet=rows[i][1][:200],
+            snippet=rows[i][1],  # full chunk text; rerank() truncates to [:200]
             link=rows[i][4],
             pubdate=rows[i][5],
             feed_url=rows[i][6],
@@ -163,15 +179,39 @@ def _hydrate(index: Index, scored: list[tuple[float, int]]) -> list[Hit]:
     ]
 
 
-def search(index: Index, model, query: str, k: int = 5) -> list[Hit]:
+def rerank(reranker, query: str, hits: list[Hit], k: int) -> list[Hit]:
+    """Score stage-1 candidates with the cross-encoder, dedupe, and keep top k.
+
+    Each passage includes podcast + episode title + full chunk text so chunks 2+
+    (which start mid-episode, without the title) still get episode context.
+    """
+    if not hits:
+        return []
+    pairs = []
+    for h in hits:
+        text = h.snippet
+        # chunk 1 of an episode repeats the title; don't send it twice
+        if text == h.episode or text.startswith(h.episode + " "):
+            text = text[len(h.episode) :].lstrip()
+        pairs.append([query, f"{h.podcast} — {h.episode}\n\n{text}"])
+    scores = reranker.predict(pairs)
+    for h, s in zip(hits, scores, strict=True):
+        h.score = float(s)
+        h.snippet = h.snippet[:200]
+    hits.sort(key=lambda h: h.score, reverse=True)
+    return dedup_hits(hits, k)
+
+
+def search(index: Index, model, reranker, query: str, k: int = 5) -> list[Hit]:
     """Score every chunk with cosine similarity and return the best k."""
     q = model.encode([query])[0].tolist()
     scored = [(_cosine(q, v), i) for i, v in enumerate(index.vectors)]
     scored.sort(reverse=True)
-    return dedup_hits(_hydrate(index, scored[: k * SEARCH_OVERFETCH]), k)
+    candidates = _hydrate(index, scored[: rerank_limit(k)])
+    return rerank(reranker, query, candidates, k)
 
 
-def search_numpy(index: Index, model, query: str, k: int = 5) -> list[Hit]:
+def search_numpy(index: Index, model, reranker, query: str, k: int = 5) -> list[Hit]:
     """Vectorized version of search(): whole index as one matrix product."""
     import numpy as np
 
@@ -186,7 +226,8 @@ def search_numpy(index: Index, model, query: str, k: int = 5) -> list[Hit]:
     if nq:
         q /= nq
     scores = matrix @ q
-    limit = min(k * SEARCH_OVERFETCH, len(scores))
+    limit = min(rerank_limit(k), len(scores))
     top = np.argpartition(scores, -limit)[-limit:]
     top = top[np.argsort(scores[top])[::-1]]
-    return dedup_hits(_hydrate(index, [(float(scores[i]), int(i)) for i in top]), k)
+    candidates = _hydrate(index, [(float(scores[i]), int(i)) for i in top])
+    return rerank(reranker, query, candidates, k)

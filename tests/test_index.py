@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from podsearch.core import corpus, index
+from tests.test_lance import FakeReranker
 
 
 class FakeModel:
@@ -16,6 +17,20 @@ class FakeModel:
 
     def encode(self, texts: list[str]) -> np.ndarray:
         return np.tile(np.asarray(self.vec, dtype=np.float32), (len(texts), 1))
+
+
+class KeywordReranker:
+    """Scores (query, passage) pairs by whether `keyword` appears in the passage."""
+
+    def __init__(self, keyword: str) -> None:
+        self.keyword = keyword
+        self.last_pairs: list[list[str]] = []
+
+    def predict(self, pairs: list[list[str]]) -> np.ndarray:
+        self.last_pairs = pairs
+        return np.asarray(
+            [1.0 if self.keyword in text else 0.0 for _q, text in pairs], dtype=np.float32
+        )
 
 
 def test_cosine_basic() -> None:
@@ -51,12 +66,12 @@ def test_build_and_search_roundtrip(tmp_path) -> None:
     conn.close()
 
     idx = index.load(vectors, db)
-    hits = index.search_numpy(idx, FakeModel([1.0, 0.0]), "q")
+    hits = index.search_numpy(idx, FakeModel([1.0, 0.0]), FakeReranker(), "q")
     assert len(hits) == 2
     assert hits[0].score == pytest.approx(1.0)
     assert {h.podcast for h in hits} == {"Pod A", "Pod B"}
 
-    hits = index.search(idx, FakeModel([1.0, 0.0]), "q", k=1)
+    hits = index.search(idx, FakeModel([1.0, 0.0]), FakeReranker(), "q", k=1)
     assert len(hits) == 1
     assert hits[0].episode in {"Episode one", "Episode two"}
     idx.conn.close()
@@ -85,7 +100,7 @@ def test_search_dedups_chunks_of_one_episode(tmp_path) -> None:
 
     idx = index.load(vectors, db)
     for fn in (index.search, index.search_numpy):
-        hits = fn(idx, FakeModel([1.0, 0.0]), "q", k=5)
+        hits = fn(idx, FakeModel([1.0, 0.0]), FakeReranker(), "q", k=5)
         assert [h.episode for h in hits].count("Episode three") == 2
         kept = {(h.podcast, h.pubdate) for h in hits if h.episode == "Episode three"}
         assert ("Pod D", 200) in kept
@@ -117,10 +132,54 @@ def test_search_numpy_zero_norm_rows(tmp_path) -> None:
     conn.close()
 
     idx = index.load(vectors, db)
-    hits = index.search_numpy(idx, ZeroVecModel(), "q", k=3)
+    hits = index.search_numpy(idx, ZeroVecModel(), FakeReranker(), "q", k=3)
     assert all(h.score == h.score for h in hits)  # no NaN scores
-    assert hits[-1].podcast == "Pod C"
-    assert hits[-1].score == 0.0
+    assert hits[-1].podcast == "Pod C"  # worst stage-1 candidate stays last
+    assert hits[-1].score == pytest.approx(1.0)  # FakeReranker score replaces it
+    idx.conn.close()
+
+
+def test_rerank_reorders_candidates(tmp_path) -> None:
+    """A lower-ranked stage-1 hit wins when the reranker scores it higher."""
+    db = tmp_path / "corpus.db"
+    vectors = tmp_path / "vectors.f32"
+    conn = _tiny_corpus(db)  # Pod A "alpha beta gamma", Pod B "delta epsilon"
+    index.build_index(conn, FakeModel([1.0, 0.0]), vectors)
+    conn.close()
+
+    idx = index.load(vectors, db)
+    for fn in (index.search, index.search_numpy):
+        hits = fn(idx, FakeModel([1.0, 0.0]), KeywordReranker("epsilon"), "q", k=1)
+        assert [h.podcast for h in hits] == ["Pod B"]
+        assert hits[0].score == pytest.approx(1.0)
+    idx.conn.close()
+
+
+def test_rerank_passage_formatting_and_snippet_truncate(tmp_path) -> None:
+    """Passages get podcast+episode context; snippets end up <= 200 chars."""
+    db = tmp_path / "corpus.db"
+    vectors = tmp_path / "vectors.f32"
+    conn = corpus.open_corpus(db)
+    # real episodes store title + "\n\n" + body: chunk 1 repeats the title
+    conn.execute(
+        "INSERT INTO episodes(feed_url, guid, podcast, title, link, pubdate, text)"
+        " VALUES ('u1', 'g1', 'Pod A', 'Episode one', 'l1', 0, ?)",
+        ("Episode one\n\n" + " ".join(["word"] * 300),),
+    )
+    conn.commit()
+    index.build_index(conn, FakeModel([1.0, 0.0]), vectors)
+    conn.close()
+
+    idx = index.load(vectors, db)
+    reranker = KeywordReranker("word")
+    hits = index.search_numpy(idx, FakeModel([1.0, 0.0]), reranker, "q", k=5)
+    assert hits and all(len(h.snippet) <= 200 for h in hits)
+
+    # every candidate passage is "<podcast> — <episode>\n\n<chunk text>"
+    first = reranker.last_pairs[0][1]
+    assert first.startswith("Pod A — Episode one\n\n")
+    # chunk 1's leading title is not duplicated in the passage
+    assert "Episode one\n\nEpisode one" not in first
     idx.conn.close()
 
 
@@ -136,6 +195,6 @@ def test_search_from_worker_thread(tmp_path) -> None:
     model = FakeModel([1.0, 0.0])
     with ThreadPoolExecutor(1) as pool:
         for fn in (index.search, index.search_numpy):
-            hits = pool.submit(fn, idx, model, "q").result()
+            hits = pool.submit(fn, idx, model, FakeReranker(), "q").result()
             assert len(hits) == 2
     idx.conn.close()

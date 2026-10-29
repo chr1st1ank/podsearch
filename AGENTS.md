@@ -67,6 +67,11 @@ naive is seconds-to-tens-of-seconds per query at scale.
   queries — `cast` for ty; abi3 wheel installs fine on cp315.
 - Index storage is scale-shaped: `vectors.f32` np.memmap + sqlite hydration of top-k hits
   (no `list[list[float]]`, no JSON index — would be GBs at this scale).
+- All four search impls rerank: stage-1 overfetches `max(6k, 30)` chunks, then a shared
+  `index.rerank` scores `query × (podcast + episode + chunk text)` with the
+  `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` CrossEncoder (sigmoid scores), before
+  `dedup_hits`. `torch` resolves via `[[tool.uv.index]] pytorch-cpu` — PyPI has no
+  cp315 Linux wheels; `tool.uv.environments` pins resolution to linux only.
 - Verified: catalog idempotent skip; fetch idempotent (`pending 0` on re-run); ingest
   incremental (0 dupes); smoke run of 20 feeds → 3,512 episodes → 5,660 chunks → 6 MB
   vectors; naive and numpy return identical hits; numpy ~0.01 s/query at that size.
