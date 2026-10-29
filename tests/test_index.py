@@ -1,5 +1,7 @@
 """Tests for podsearch.core.index helpers that don't need the real model."""
 
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 import pytest
 
@@ -119,4 +121,21 @@ def test_search_numpy_zero_norm_rows(tmp_path) -> None:
     assert all(h.score == h.score for h in hits)  # no NaN scores
     assert hits[-1].podcast == "Pod C"
     assert hits[-1].score == 0.0
+    idx.conn.close()
+
+
+def test_search_from_worker_thread(tmp_path) -> None:
+    """FastAPI runs sync endpoints in a threadpool: load on main, search elsewhere."""
+    db = tmp_path / "corpus.db"
+    vectors = tmp_path / "vectors.f32"
+    conn = _tiny_corpus(db)
+    index.build_index(conn, FakeModel([1.0, 0.0]), vectors)
+    conn.close()
+
+    idx = index.load(vectors, db)
+    model = FakeModel([1.0, 0.0])
+    with ThreadPoolExecutor(1) as pool:
+        for fn in (index.search, index.search_numpy):
+            hits = pool.submit(fn, idx, model, "q").result()
+            assert len(hits) == 2
     idx.conn.close()

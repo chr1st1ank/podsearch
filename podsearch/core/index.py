@@ -119,7 +119,7 @@ def build_index(
 def load(vectors_path: Path = VECTORS_PATH, db_path: Path = CORPUS_DB) -> Index:
     import numpy as np
 
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, check_same_thread=False)
     meta = dict(conn.execute("SELECT key, value FROM meta"))
     dim, n = int(meta["dim"]), int(meta["n"])
     vectors = np.memmap(vectors_path, dtype=np.float32, mode="r").reshape(n, dim)
