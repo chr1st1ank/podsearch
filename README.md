@@ -1,6 +1,6 @@
-# podsearch — profiling demo
+# podsearch
 
-Semantic search over podcast episodes, built to be profiled. Three search implementations:
+Semantic search over podcast episodes. Four search implementations:
 
 - `naive`: cosine similarity in a pure-Python loop (`index.search`) — the hot spot
 - `numpy`: the same search as a single matrix product (`index.search_numpy`) — ~100x+ faster

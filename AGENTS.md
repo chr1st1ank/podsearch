@@ -1,128 +1,89 @@
-# Handoff: Tachyon profiling demo ("podsearch")
+# Agent instructions
 
-## Goal
+This file helps AI agents work effectively in the `podsearch` repository.
 
-Build/blog about the new built-in sampling profiler **Tachyon** (`profiling.sampling`, Python 3.15,
-PEP 799) for a blog post (Hugo blog at `~/code/blog`) and a 25-min talk for a mixed local Python
-meetup (50-80 people, presentation first, then the post). Workflow skill: `blog-writing` — currently
-between Phase 2 (research, mostly done) and Phase 3 (storyline). Drafts live in `~/code/blog/drafts/`.
+## Project purpose
 
-## User decisions so far
+Semantic search over podcast episodes. Feed metadata comes from the Podcast Index
+catalog, episode text is fetched via RSS, embedded locally with
+`intfloat/multilingual-e5-small` (384-dim, sentence-transformers), and searched through
+four swappable backends: `naive`, `numpy`, `lancedb`, `qdrant`. A FastAPI service and a
+CLI suite sit on top. Python 3.15, uv/hatchling, flat layout (`podsearch/` at root).
 
-- Example = hook, not an optimization exercise: **only ONE improvement round**.
-- Example: podcast-episode semantic search over real RSS data with **local** embeddings
-  (`intfloat/multilingual-e5-small`, 384-dim, via sentence-transformers). No LLM calls.
-  (Started on model2vec `potion-*` static embeddings; swapped because static
-  bag-of-subword vectors broke cross-language retrieval and German compounds
-  like "Islandpferde" -> island episodes. `tests/test_retrieval.py` guards this.)
-  Replaced the earlier
-  "Ask the PEPs" idea — that corpus was too small to produce a real performance problem.
-- Full-size corpus is the point: hundreds of thousands of episodes so the naive search
-  loop is genuinely slow (target ~15-25 s/query vs ~0.3 s at the old 12.6k-chunk scale).
-- cProfile mentioned but not detailed; py-spy as alternative; memory profiling only touched
-  (link user's 2022 posts: `2022-09-04-locating-memory-leaks-in-services-part1/2.md`).
-- Work lives in `~/code/blog-assets/code/profiling-demo/` (copied out of drafts/).
+## Repository structure
 
-## Pipeline (independent CLI stages, all under gitignored data/)
+- `podsearch/core/` — pure library: catalog, fetch, corpus, index, stores
+- `podsearch/cli/` — one entrypoint module per `podsearch-*` console script
+- `podsearch/api.py` — FastAPI app (`/search`, `/search-async`, `/health`)
+- `podsearch/static/` — minimal web UI served by the API
+- `podsearch/queries.txt` — 20 queries used by `bench` and `load`
+- `tests/` — pytest suite; `test_retrieval.py` guards cross-language retrieval quality
+- `notebooks/` — marimo data-sampler notebook
+- `orchestration/` — Dagu DAGs wrapping the pipeline stages
+- `compose.yaml` — Qdrant server for `--impl qdrant`
+- `data/` — gitignored; all pipeline stores live here (see README storage layout)
+- `local/` — gitignored scratch space. Put working files here.
 
-`podsearch-catalog` — download+extract the Podcast Index SQLite dump to
-`data/podcastindex_feeds.db` (~5 GB; 4.7M feeds; **feed metadata only**, no episode content).
-`podsearch-fetch-rss` — select feeds (`--feeds`, `--lang` default en+de, `--min-episodes`,
-`--order recent|episodes|popularity`) → fetch RSS concurrently → append `data/rss/part-*.parquet`
-(raw body + fetch_date + all catalog columns). Idempotent: refetches only missing feeds or
-feeds whose catalog `lastUpdate` is newer than `fetch_date`.
-`podsearch-ingest` — feedparser on stored parts → `data/corpus.db` episodes table
-(incremental via `ingested_parts`; `--max-per-feed` 300 caps mega-feeds).
-Feed-parser selection flag is `--parser {feedparser,rs}` — `--impl` now selects the
-storage backend (`{sqlite,lancedb}`).
-`podsearch-index` — episodes → chunks (≤3/episode) → batched encode → `data/vectors.f32`
-raw float32 + `chunks.vector_row` alignment; `meta` table holds dim/n.
+## Key architectural rules
 
-Alternative **lancedb pipeline** (`podsearch-ingest --impl lancedb`): fuses ingest+index —
-serial parse → chunk → batched encode → insert into `data/lancedb/` `chunks` table
-(vector + all metadata columns, no hydration at search time). Incremental via its own
-`ingested_parts` table; delete-then-add per refetched feed; `--rebuild` recreates the
-store; HNSW-SQ cosine ANN index once ≥50k rows. Separate DAG:
-`orchestration/podsearch-lancedb.yaml` (catalog → fetch_rss → ingest_lancedb); both DAGs
-share the rss parquet store intentionally — fetch once, each ingests independently.
+- `core/` is the pure library; `cli/` modules only parse args and call `core/`.
+- `core/` must not import from `cli/` or `api`.
+- `--impl` selects the storage/search backend (`naive|numpy|lancedb|qdrant`);
+  `--parser` selects the feed parser (`feedparser|rs`).
+- All search impls share the retrieve-then-rerank flow: overfetch `max(6k, 30)` chunks,
+  cross-encoder `index.rerank` (`cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`,
+  sigmoid scores), then `dedup_hits`.
+- Every pipeline stage is idempotent — incremental bookkeeping (`ingested_parts`,
+  `fetch_date` vs catalog `lastUpdate`) decides what to skip. Preserve this.
 
-Alternative **qdrant pipeline** (`podsearch-ingest --impl qdrant`): same fused flow into a
-Qdrant server (`task qdrant-up`, docker compose, data in `data/qdrant/`; URL via
-`--qdrant-url`/`PODSEARCH_QDRANT_URL`). `chunks` collection (cosine, payload = metadata,
-keyword index on feed_url), `ingested_parts` bookkeeping, deterministic uuid5 point ids,
-HNSW build deferred (indexing_threshold=0) until bulk load ends. DAG:
-`orchestration/podsearch-qdrant.yaml`. Shared helpers in `core/ingest_common.py`.
+## Gotchas
 
-Then `podsearch-query`|`podsearch-bench` (`--impl naive|numpy|lancedb|qdrant`), `podsearch-serve`
-(:8000, takes `--impl`), `podsearch-load`. `podsearch-bench --queries` defaults to 5 —
-naive is seconds-to-tens-of-seconds per query at scale.
+- lancedb `db.list_tables()` returns a paginated object — use `.tables` for names;
+  `Table.search()` stubs type vector queries wrong — `cast` for ty.
+- `torch` resolves via `[[tool.uv.index]] pytorch-cpu` — PyPI has no cp315 Linux
+  wheels; `tool.uv.environments` pins resolution to Linux only.
+- Index storage is scale-shaped: `vectors.f32` np.memmap + SQLite hydration of top-k
+  hits. No `list[list[float]]` or JSON index — GBs at full-corpus scale.
+- lancedb returns cosine *distance*, qdrant cosine *similarity* — scores not comparable.
+- Fetch politeness: bounded concurrency, timeouts, UA header. Failed fetches are not
+  stored, so re-runs retry them — intentional for transient errors.
 
-## What exists (verified on Python 3.15.0)
+## Commands
 
-- flat-layout uv/hatchling project (`podsearch/` at root, editable install). Deps:
-  sentence-transformers, fastapi, uvicorn, httpx, feedparser, feedparser-rs, pyarrow,
-  polars, lancedb.
-  `task check` = ruff + ty (all error) + pytest.
-- `podsearch/core/{paths,catalog,fetch,corpus,index,lance_store}.py` (pure lib),
-  `podsearch/api.py` (FastAPI app), `podsearch/cli/{catalog,fetch_rss,ingest,indexing,
-  serve,load,query,bench}.py` (one entrypoint per `podsearch-*` console script,
-  `common.py` for shared query/bench helpers)
-- lancedb 0.40 gotchas: `db.list_tables()` returns a paginated response object — use
-  `.tables` for names; `Table.search()` stubs type the builder wrong for vector
-  queries — `cast` for ty; abi3 wheel installs fine on cp315.
-- Index storage is scale-shaped: `vectors.f32` np.memmap + sqlite hydration of top-k hits
-  (no `list[list[float]]`, no JSON index — would be GBs at this scale).
-- All four search impls rerank: stage-1 overfetches `max(6k, 30)` chunks, then a shared
-  `index.rerank` scores `query × (podcast + episode + chunk text)` with the
-  `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` CrossEncoder (sigmoid scores), before
-  `dedup_hits`. `torch` resolves via `[[tool.uv.index]] pytorch-cpu` — PyPI has no
-  cp315 Linux wheels; `tool.uv.environments` pins resolution to linux only.
-- Verified: catalog idempotent skip; fetch idempotent (`pending 0` on re-run); ingest
-  incremental (0 dupes); smoke run of 20 feeds → 3,512 episodes → 5,660 chunks → 6 MB
-  vectors; naive and numpy return identical hits; numpy ~0.01 s/query at that size.
+```bash
+task check        # lint + typecheck + test — run before handing work back
+task lint         # ruff check --fix + ruff format
+task typecheck    # ty check (all rules error severity)
+task test         # pytest with coverage
+task catalog      # download Podcast Index feed catalog (idempotent)
+task fetch        # fetch RSS into data/rss/*.parquet (idempotent)
+task ingest       # parse RSS into corpus.db (incremental)
+task index        # build vectors.f32
+task qdrant-up    # start Qdrant on :6333 (needed for qdrant tests/impl)
+task dagu         # Dagu web UI on :8081
+task serve        # FastAPI on :8000
+task bench        # search benchmark
+task update-dependencies  # upgrade locks + hooks within cooldown, then check
+```
 
-## Verified numbers (from the old PEP corpus — refresh after full ingest)
+Run from the repository root. Dagu runs via `mise exec -- dagu` (mise tool, not a
+Python dep); tasks export `PODSEARCH_DIR` for the DAGs.
 
-- Old scale: 12,588 chunks; naive ~0.32 s/query; numpy ~0.003 s/query; ingest 17 s.
-- Tachyon `run` + `--flamegraph` works; flamegraph shows `_cosine` line. 20,809 samples in
-  20.8 s but **"Error rate: 25.93"** — worth investigating (rate? 3.15.0 bug?)
-- `attach`/`dump` **blocked**: `ptrace_scope=1`. Needs user-run
-  `echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope` (restore to 1 after)
-- Tachyon CLI matches docs: `run|attach|dump|replay`, `--mode {wall,cpu,gil,exception}`,
-  `--async-aware`, `--native`, `--opcodes`, `--live`, `--diff-flamegraph BASELINE`, `--binary`
+## House rules
 
-## Docs/research notes
+- **Scratch files go in `local/`** (gitignored). Never commit working notes or dumps.
+- Never run `sudo`; if profiler `attach` is blocked by `ptrace_scope`, ask the user.
+- The `naive` implementation is intentionally unoptimized — it is the project's
+  profiling target. Don't "fix" it.
+- Never log or return secrets, tokens, or credentials.
 
-`~/code/blog/drafts/phase2-profiling-python-research.md` — sources, flags, caveats (sampling =
-estimates, not for <1 s runs/exact call counts/benchmarks; same-minor-version requirement; cProfile
-→ `profiling.tracing`, `profile` removed in 3.17). Detailed execution plan:
-`~/code/blog/drafts/profiling-demo-spike-plan.md` (paths partially outdated — user edited
-to point into drafts/).
+## Code style
 
-## Next steps
+- Type hints required; `py.typed` is shipped. `ty` runs at error severity on all rules.
+- Keep CLI modules thin; logic belongs in `core/` where it is testable.
 
-1. Finish spike verification if needed: modes (wall vs cpu shows no diff on CPU-bound bench — use
-   server under load), `--native`, `--opcodes`, `--async-aware` on `/search-async`,
-   `--diff-flamegraph` for before/after, cProfile/py-spy overhead comparison, tracemalloc/memray
-   check, report to `~/code/blog/drafts/phase2b-profiling-spike-results.md` (per plan §4–10).
-2. Refresh README/AGENTS numbers once the full fetch+ingest+index has run at scale.
-3. Phase 3: storyline + headline options (read `references/writing-guide.md` in the blog-writing
-   skill dir); save to `drafts/phase3-*.md`, confirm with user before drafting.
+## Pre-commit checklist
 
-## Cautions
-
-- Never run `sudo`; if attach is blocked, ask user to set ptrace_scope.
-- Keep code "naturally naive" — no `sleep()`/fake load.
-- Fetch politeness: bounded concurrency, timeouts, UA header; don't re-hammer dead feeds
-  (idempotency in the parquet store handles this; failures are not stored, so a re-run
-  retries them — intentional for transient errors).
-- A copied `.venv` once had stale script shebangs pointing at the old drafts env;
-  `uv sync --reinstall` fixes them.
-
-## Known issues / TODO
-
-- **Media-format sibling feeds**: variants with different content — c't uplink
-  HD/SD/audio have different chash — are still indexed once per feed but collapse to one
-  hit at query time via the (title, pubdate) text dedup. Keeping them out of the corpus
-  entirely (e.g. audio-only filter at selection) remains optional.
-- Lancedb returns cosine *distance*, qdrant cosine *similarity*; printed scores not comparable.
+- `task check` passes
+- New logic has tests; network and stores are faked/mocked in tests
+- No secrets in code or log output

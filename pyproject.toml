@@ -1,7 +1,7 @@
 [project]
 name = "podsearch"
 version = "0.1.0"
-description = "Semantic search over podcast episodes - profiling demo"
+description = "Semantic search over podcast episodes"
 readme = "README.md"
 requires-python = ">=3.15"
 dependencies = [
