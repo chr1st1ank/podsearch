@@ -1,236 +1,186 @@
-"""Stage 2: fetch RSS bodies for selected feeds into the parquet store."""
+"""Stage 2: fetch RSS bodies for selected feeds into the parquet store.
 
+Contract with every later stage: the stored `rss` text is valid Unicode and
+never declares another encoding. Legacy encodings are resolved here, once, by
+`decode_feed`.
+"""
+
+import asyncio
+import codecs
+import logging
+import re
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import Counter, defaultdict
+from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
-import feedparser  # TODO: kept as slow baseline for the profiling demo
-import feedparser_rs  # TODO: no manylinux cp315 wheel yet - builds from sdist (needs cargo)
 import httpx
-import pyarrow as pa
-import pyarrow.parquet as pq
 
-from podsearch.core import catalog
+from podsearch.core import rss_store
 from podsearch.core.paths import RSS_DIR
 
-UA = {"User-Agent": "podsearch-demo/0.1 (profiling demo; one-off fetch)"}
-PART_SIZE = 500
-FETCH_TIMEOUT = 10
+log = logging.getLogger(__name__)
 
-# podcastindex catalog columns that are INTEGER in sqlite (rest are TEXT).
-_INT_COLS = {
-    "id",
-    "lastUpdate",
-    "lastHttpStatus",
-    "dead",
-    "itunesId",
-    "explicit",
-    "newestItemPubdate",
-    "oldestItemPubdate",
-    "episodeCount",
-    "popularityScore",
-    "priority",
-    "createdOn",
-    "updateFrequency",
-    "newestEnclosureDuration",
-    "podcastId",
-    "duplicateOf",
-}
+UA = {"User-Agent": "podsearch/0.1 (podcast feed indexer)"}
+FETCH_TIMEOUT = 10  # per connect/read operation
+FETCH_DEADLINE = 180  # whole request, so a slow-drip server cannot hold a slot forever
+# Out-of-memory guard, not a truncation policy: ~3x the largest feed seen in practice.
+MAX_FEED_BYTES = 100 << 20
+PER_HOST = 4
+
+_BOMS = (
+    (codecs.BOM_UTF8, "utf-8-sig"),
+    (codecs.BOM_UTF32_LE, "utf-32"),
+    (codecs.BOM_UTF32_BE, "utf-32"),
+    (codecs.BOM_UTF16_LE, "utf-16"),
+    (codecs.BOM_UTF16_BE, "utf-16"),
+)
+_DECLARED_ENCODING = re.compile(rb"""^\s*<\?xml[^>]*?\sencoding\s*=\s*["']([\w.:-]+)["']""", re.I)
+_DECLARATION = re.compile(r"""^(\s*<\?xml[^>]*?\sencoding\s*=\s*["'])[\w.:-]+(["'])""", re.I)
 
 
-def _coerce(value: Any, is_int: bool) -> Any:
-    if value is None or value == "":
-        return None
-    return int(value) if is_int else str(value)
+@dataclass(frozen=True)
+class FetchStats:
+    selected: int
+    pending: int
+    ok: int
+    failed: int
 
 
-def _part_table(records: list[dict[str, Any]]) -> pa.Table:
-    cols: dict[str, Any] = {}
-    for name in catalog.CATALOG_COLUMNS:
-        is_int = name in _INT_COLS
-        arrow_type = pa.int64() if is_int else pa.string()
-        cols[name] = pa.array([_coerce(r.get(name), is_int) for r in records], type=arrow_type)
-    cols["rss"] = pa.array([r["rss"] for r in records], type=pa.string())
-    cols["fetch_date"] = pa.array([r["fetch_date"] for r in records], type=pa.int64())
-    return pa.table(cols)
+def _decode(body: bytes, encodings: Iterable[str | None]) -> str:
+    for encoding in filter(None, encodings):
+        try:
+            return body.decode(encoding)
+        except LookupError, UnicodeDecodeError:
+            pass
+    return body.decode("utf-8", errors="replace")
 
 
-def already_fetched(rss_dir: Path = RSS_DIR) -> dict[str, int]:
-    """Map feed url -> newest fetch_date across the stored parquet parts."""
-    fetched: dict[str, int] = {}
-    for part in sorted(rss_dir.glob("part-*.parquet")):
-        table = pq.read_table(part, columns=["url", "fetch_date"])
-        for url, ts in zip(table["url"].to_pylist(), table["fetch_date"].to_pylist(), strict=True):
-            if ts > fetched.get(url, 0):
-                fetched[url] = ts
-    return fetched
+def decode_feed(body: bytes, charset: str | None = None) -> str:
+    """Decode an RSS body to str and rewrite its XML declaration to utf-8.
+
+    Encoding precedence: BOM, XML declaration, HTTP charset, UTF-8; replacement
+    characters only if all of those fail. The declaration is rewritten because
+    parsers re-apply it to the text they are handed (feedparser_rs turns
+    "Grüße" declared as ISO-8859-1 into mojibake otherwise).
+    """
+    bom = next((encoding for mark, encoding in _BOMS if body.startswith(mark)), None)
+    if bom:
+        encodings = [bom]
+    else:
+        declared = _DECLARED_ENCODING.match(body[:512])
+        encodings = [declared and declared.group(1).decode("ascii"), charset, "utf-8"]
+    return _DECLARATION.sub(r"\1utf-8\2", _decode(body, encodings), count=1)
 
 
 def pending_feeds(feeds: list[dict[str, Any]], rss_dir: Path = RSS_DIR) -> list[dict[str, Any]]:
-    """Feeds we have not stored yet, or whose catalog lastUpdate is newer."""
-    fetched = already_fetched(rss_dir)
-    return [
-        f
+    """Feeds we have not stored yet, or whose catalog lastUpdate is newer (one per url)."""
+    fetched = rss_store.already_fetched(rss_dir)
+    due = {
+        f["url"]: f
         for f in feeds
         if f["url"] not in fetched or (f.get("lastUpdate") or 0) > fetched[f["url"]]
-    ]
+    }
+    return list(due.values())
 
 
-def _fetch_one(client: httpx.Client, url: str) -> bytes | None:
+def _host(url: str) -> str:
     try:
-        r = client.get(url, timeout=FETCH_TIMEOUT)
-        if r.status_code == 200 and r.content:
-            return r.content
-    except httpx.HTTPError:
-        pass
-    return None
+        return urlsplit(url).hostname or ""
+    except ValueError:
+        return ""
 
 
-def write_part(records: list[dict[str, Any]], rss_dir: Path, seq: int) -> Path:
-    path = rss_dir / f"part-{seq:04d}.parquet"
-    pq.write_table(_part_table(records), path)
-    return path
+async def _fetch_one(client: httpx.AsyncClient, url: str, max_bytes: int) -> str | None:
+    """GET url and return its decoded text; None on any failure (re-runs retry it)."""
+    try:
+        async with asyncio.timeout(FETCH_DEADLINE), client.stream("GET", url) as r:
+            if r.status_code != 200:
+                return None
+            body = bytearray()
+            async for chunk in r.aiter_bytes():
+                body += chunk
+                if len(body) > max_bytes:
+                    log.warning("skipping %s: body exceeds %d MB", url, max_bytes >> 20)
+                    return None
+            return decode_feed(bytes(body), r.charset_encoding) if body else None
+    except (httpx.HTTPError, httpx.InvalidURL, TimeoutError, UnicodeError) as e:
+        log.debug("fetch failed for %s: %r", url, e)
+        return None
 
 
-class _PartWriter:
-    """Streams fetched rows into part-*.parquet files of at most part_size rows.
+async def _fetch_pending(
+    pending: list[dict[str, Any]],
+    rss_dir: Path,
+    concurrency: int,
+    part_size: int,
+    max_feed_bytes: int,
+    per_host: int,
+    transport: httpx.AsyncBaseTransport | None,
+) -> Counter[str]:
+    counts: Counter[str] = Counter()
+    slots = asyncio.Semaphore(concurrency)
+    hosts: defaultdict[str, asyncio.Semaphore] = defaultdict(lambda: asyncio.Semaphore(per_host))
+    write_lock = asyncio.Lock()
 
-    A row group is flushed as each result arrives, so an RSS body stays alive
-    for a single loop iteration instead of accumulating a part in memory.
-    Parts land under their final name only on close, so a killed run leaves no
-    footer-less file behind.
-    """
+    async def process(feed: dict[str, Any]) -> None:
+        # a slot is held until the body is written, so at most `concurrency` bodies are alive
+        async with hosts[_host(feed["url"])], slots:
+            body = await _fetch_one(client, feed["url"], max_feed_bytes)
+            if body is None:
+                counts["failed"] += 1
+            else:
+                counts["ok"] += 1
+                record = {**feed, "rss": body, "fetch_date": int(time.time())}
+                async with write_lock:
+                    await asyncio.to_thread(writer.write, record)
+        if counts.total() % 500 == 0:
+            log.info("%d/%d fetched (%d failed)", counts.total(), len(pending), counts["failed"])
 
-    def __init__(self, rss_dir: Path, seq: int, part_size: int) -> None:
-        self._rss_dir, self._seq, self._part_size = rss_dir, seq, part_size
-        self._schema = _part_table([]).schema
-        self._writer: pq.ParquetWriter | None = None
-        self._tmp: Path | None = None
-        self._n_part = 0
-        self._rows = 0
-
-    def write(self, record: dict[str, Any]) -> None:
-        if self._writer is None:
-            seq = self._seq * 10_000 + self._n_part
-            self._tmp = self._rss_dir / f"part-{seq:04d}.parquet.tmp"
-            self._writer = pq.ParquetWriter(self._tmp, self._schema)
-            self._n_part += 1
-            self._rows = 0
-        self._writer.write_table(_part_table([record]))
-        self._rows += 1
-        if self._rows >= self._part_size:
-            self.close()
-
-    def close(self) -> None:
-        if self._writer is None or self._tmp is None:
-            return
-        self._writer.close()
-        self._tmp.rename(self._tmp.with_suffix(""))
-        self._writer = None
+    with rss_store.PartWriter(rss_dir, part_size) as writer:
+        async with httpx.AsyncClient(
+            headers=UA,
+            follow_redirects=True,
+            timeout=httpx.Timeout(FETCH_TIMEOUT),
+            limits=httpx.Limits(max_connections=concurrency),
+            transport=transport,
+        ) as client:
+            tasks = [asyncio.create_task(process(f)) for f in pending]
+            try:
+                await asyncio.gather(*tasks)
+            finally:
+                # on error or Ctrl-C do not keep fetching the remaining feeds
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+    return counts
 
 
 def fetch_rss(
     feeds: list[dict[str, Any]],
     rss_dir: Path = RSS_DIR,
     concurrency: int = 32,
-    part_size: int = PART_SIZE,
-) -> dict[str, int]:
-    """Fetch the pending feeds and append results to the parquet store."""
+    part_size: int = rss_store.PART_SIZE,
+    max_feed_bytes: int = MAX_FEED_BYTES,
+    per_host: int = PER_HOST,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> FetchStats:
+    """Fetch the pending feeds and append results to the parquet store.
+
+    Runs its own event loop, so it cannot be called from async code.
+    """
     rss_dir.mkdir(parents=True, exist_ok=True)
     pending = pending_feeds(feeds, rss_dir)
-    stats = {"selected": len(feeds), "pending": len(pending), "ok": 0, "failed": 0}
-    if not pending:
-        return stats
-    seq = int(time.time())
-    parts = _PartWriter(rss_dir, seq, part_size)
-    client = httpx.Client(headers=UA, follow_redirects=True)
-    try:
-        with ThreadPoolExecutor(max_workers=concurrency) as pool:
-            futures = {pool.submit(_fetch_one, client, f["url"]): f for f in pending}
-            for i, fut in enumerate(as_completed(futures), 1):
-                # pop, not index: finished futures retain their result - keeping the
-                # dict entry alive would hold every fetched RSS body until the end
-                feed = futures.pop(fut)
-                body = fut.result()
-                if body is None:
-                    stats["failed"] += 1
-                else:
-                    stats["ok"] += 1
-                    parts.write(
-                        {
-                            **feed,
-                            "rss": body.decode("utf-8", errors="replace"),
-                            "fetch_date": int(time.time()),
-                        }
-                    )
-                if i % 500 == 0:
-                    print(f"  {i}/{len(pending)} fetched ({stats['failed']} failed)")
-    finally:
-        parts.close()
-        client.close()
-    return stats
-
-
-def lang_code(language: Any) -> str:
-    """Normalize a catalog language value to a primary subtag; 'und' if missing."""
-    if not language:
-        return "und"
-    return str(language).split("-")[0].strip().lower() or "und"
-
-
-def parse_feed(
-    body: str,
-    feed_url: str,
-    podcast: str,
-    max_episodes: int | None = None,
-    impl: str = "rs",
-    language: Any = None,
-) -> list[dict[str, Any]]:
-    """Parse one RSS body into episode dicts. Used by the ingest stage."""
-    import calendar
-
-    # TODO: Bottleneck (feedparser impl). Flags lead to 1.65x speedup
-    fp = feedparser_rs if impl == "rs" else feedparser
-    parsed = fp.parse(body, sanitize_html=False, resolve_relative_uris=False)
-    feed_title = parsed.feed.get("title")
-    podcast_name = podcast or (str(feed_title) if feed_title else "")
-    lang = lang_code(language)
-    episodes: list[dict[str, Any]] = []
-    entries = parsed.entries[:max_episodes] if max_episodes is not None else parsed.entries
-    for entry in entries:
-        if entry.get("content"):
-            description = entry.content[0].get("value", "")
-        else:
-            description = entry.get("summary") or entry.get("itunes_summary") or ""
-        guid = entry.get("id") or entry.get("link") or entry.get("title") or ""
-        parsed_date = entry.get("published_parsed") or entry.get("updated_parsed")
-        episodes.append(
-            {
-                "feed_url": feed_url,
-                "guid": guid,
-                "podcast": podcast_name,
-                "title": entry.get("title") or "(untitled)",
-                "link": entry.get("link") or "",
-                "pubdate": calendar.timegm(parsed_date) if parsed_date else 0,
-                "description": description,
-                "language": lang,
-            }
+    counts = (
+        asyncio.run(
+            _fetch_pending(
+                pending, rss_dir, concurrency, part_size, max_feed_bytes, per_host, transport
+            )
         )
-    return episodes
-
-
-def prune_parts(rss_dir: Path = RSS_DIR, max_age_days: int = 14) -> int:
-    """Delete parquet parts older than max_age_days; returns the count removed.
-
-    Feeds whose only copies were in pruned parts look unfetched on the next
-    run and get refetched - the store's TTL is the refresh policy. Episodes
-    already ingested from them stay in corpus.db.
-    """
-    cutoff = time.time() - max_age_days * 86_400
-    removed = 0
-    for part in sorted(rss_dir.glob("part-*.parquet")):
-        if part.stat().st_mtime < cutoff:
-            part.unlink()
-            removed += 1
-    return removed
+        if pending
+        else Counter()
+    )
+    return FetchStats(len(feeds), len(pending), counts["ok"], counts["failed"])

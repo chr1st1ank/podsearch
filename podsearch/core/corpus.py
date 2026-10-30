@@ -7,9 +7,9 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-import pyarrow.parquet as pq
+import polars as pl
 
-from podsearch.core import fetch
+from podsearch.core import parse, rss_store
 from podsearch.core.paths import CORPUS_DB, RSS_DIR
 
 
@@ -107,39 +107,33 @@ def ingest_parts(
     rss_dir: Path = RSS_DIR,
     db_path: Path = CORPUS_DB,
     max_per_feed: int = 300,
-    impl: str = "rs",
+    impl: parse.Parser = "rs",
     max_parts: int | None = None,
 ) -> dict[str, int]:
     """Parse not-yet-ingested parquet parts (at most max_parts) into the episodes table."""
     conn = open_corpus(db_path)
     try:
         done = {row[0] for row in conn.execute("SELECT path FROM ingested_parts")}
-        parts = [p for p in sorted(rss_dir.glob("part-*.parquet")) if p.name not in done][
-            :max_parts
-        ]
-        latest = fetch.already_fetched(rss_dir)
+        parts = [p for p in rss_store.list_parts(rss_dir) if p.name not in done][:max_parts]
+        latest = rss_store.already_fetched(rss_dir)
         stats = {"parts": 0, "episodes": 0, "skipped": len(done), "stale": 0}
         for px, part in enumerate(parts):
             print(f"Processing part {px + 1}/{len(parts)}")
             # parts written before ADR-0001 lack the language column -> 'und'
             cols = ["url", "title", "rss", "fetch_date"]
-            if "language" in pq.read_schema(part).names:
+            if "language" in pl.read_parquet_schema(part):
                 cols.append("language")
-            table = pq.read_table(part, columns=cols)
-            langs = table["language"].to_pylist() if "language" in cols else [None] * table.num_rows
+            table = pl.read_parquet(part, columns=cols)
+            if "language" not in table.columns:
+                table = table.with_columns(language=pl.lit(None, pl.String))
             rows = []
-            for url, podcast, body, fetch_date, language in zip(
-                table["url"].to_pylist(),
-                table["title"].to_pylist(),
-                table["rss"].to_pylist(),
-                table["fetch_date"].to_pylist(),
-                langs,
-                strict=True,
-            ):
+            for url, podcast, body, fetch_date, language in table.select(
+                "url", "title", "rss", "fetch_date", "language"
+            ).iter_rows():
                 if body is None or fetch_date < latest[url]:
                     stats["stale"] += body is not None
                     continue
-                for ep in fetch.parse_feed(body, url, podcast or "", max_per_feed, impl, language):
+                for ep in parse.parse_feed(body, url, podcast or "", max_per_feed, impl, language):
                     text = strip_html(f"{ep['title']}\n\n{ep['description']}")
                     if not text:
                         continue

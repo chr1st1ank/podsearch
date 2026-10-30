@@ -12,7 +12,7 @@ CLI suite sit on top. Python 3.15, uv/hatchling, flat layout (`podsearch/` at ro
 
 ## Repository structure
 
-- `podsearch/core/` — pure library: catalog, fetch, corpus, index, stores
+- `podsearch/core/` — pure library: catalog, fetch, rss_store, parse, corpus, index, stores
 - `podsearch/cli/` — one entrypoint module per `podsearch-*` console script
 - `podsearch/api.py` — FastAPI app (`/search`, `/search-async`, `/health`)
 - `podsearch/static/` — minimal web UI served by the API
@@ -48,8 +48,14 @@ CLI suite sit on top. Python 3.15, uv/hatchling, flat layout (`podsearch/` at ro
 - Index storage is scale-shaped: `vectors.f32` np.memmap + SQLite hydration of top-k
   hits. No `list[list[float]]` or JSON index — GBs at full-corpus scale.
 - lancedb returns cosine *distance*, qdrant cosine *similarity* — scores not comparable.
-- Fetch politeness: bounded concurrency, timeouts, UA header. Failed fetches are not
-  stored, so re-runs retry them — intentional for transient errors.
+- Fetch politeness: bounded concurrency (global + per host), timeouts, UA header. Failed
+  fetches are not stored, so re-runs retry them — intentional for transient errors.
+- Stored `rss` text is already Unicode and declares utf-8 (`fetch.decode_feed`) — consumers
+  must not handle legacy encodings. The size cap (`fetch.MAX_FEED_BYTES`) is an OOM guard, not a
+  truncation policy.
+- `data/rss` writes use pyarrow's streaming `ParquetWriter` on purpose (feeds are ~1.4 MB
+  avg, polars has no incremental writer); reads go through `rss_store` (unreadable parts
+  are skipped with a warning).
 
 ## Commands
 

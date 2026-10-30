@@ -1,12 +1,11 @@
 """Helpers shared by the fused ingest+index stores (lancedb, qdrant)."""
 
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 import polars as pl
 
-from podsearch.core import corpus, fetch
+from podsearch.core import corpus, parse
 
 EPISODE_COLUMNS = {
     "feed_url": pl.String,
@@ -21,18 +20,8 @@ EPISODE_COLUMNS = {
 CHUNK_COLUMNS = ["feed_url", "guid", "podcast", "episode", "link", "pubdate", "text", "language"]
 
 
-def latest_fetch_dates(rss_dir: Path) -> pl.DataFrame:
-    """Newest fetch_date per feed url across all stored parts."""
-    return (
-        pl.scan_parquet(rss_dir / "part-*.parquet")
-        .group_by("url")
-        .agg(latest=pl.col("fetch_date").max())
-        .collect()
-    )
-
-
-def parse_feed(feed: dict[str, Any], max_episodes: int, impl: str) -> list[dict[str, Any]]:
-    return fetch.parse_feed(
+def parse_feed(feed: dict[str, Any], max_episodes: int, impl: parse.Parser) -> list[dict[str, Any]]:
+    return parse.parse_feed(
         feed["rss"],
         feed["url"],
         feed["title"] or "",

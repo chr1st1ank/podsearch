@@ -55,6 +55,28 @@ CATALOG_COLUMNS = [
     "duplicateOf",
 ]
 
+# CATALOG_COLUMNS that are INTEGER in the catalog sqlite (the rest are TEXT).
+INT_COLUMNS = frozenset(
+    {
+        "id",
+        "lastUpdate",
+        "lastHttpStatus",
+        "dead",
+        "itunesId",
+        "explicit",
+        "newestItemPubdate",
+        "oldestItemPubdate",
+        "episodeCount",
+        "popularityScore",
+        "priority",
+        "createdOn",
+        "updateFrequency",
+        "newestEnclosureDuration",
+        "podcastId",
+        "duplicateOf",
+    }
+)
+
 
 def ensure_db(db_path: Path = CATALOG_DB, url: str = CATALOG_URL) -> Path:
     """Download and extract the feed catalog if it is not already there."""

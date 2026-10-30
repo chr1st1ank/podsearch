@@ -244,7 +244,9 @@ task load       # = uv run podsearch-load
 
 - `podsearch/core/paths.py` — data/ file locations
 - `podsearch/core/catalog.py` — catalog download + feed selection SQL
-- `podsearch/core/fetch.py` — idempotent RSS fetch -> parquet parts, `parse_feed`
+- `podsearch/core/fetch.py` — idempotent async RSS fetch (bounded, per-host limited); decodes every feed to UTF-8 at fetch time
+- `podsearch/core/rss_store.py` — `data/rss` parquet schema, atomic streaming `PartWriter`, `already_fetched`, `prune_parts`
+- `podsearch/core/parse.py` — `parse_feed`, `lang_code` (RSS body -> episode dicts)
 - `podsearch/core/corpus.py` — `strip_html`, `chunk`, corpus.db schema, `ingest_parts`
 - `podsearch/core/index.py` — `build_index`, `search` (naive), `search_numpy`, `rerank` (cross-encoder), hit hydration
 - `podsearch/core/lance_store.py` — fused ingest+index + `search` for `--impl lancedb`

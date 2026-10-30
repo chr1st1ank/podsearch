@@ -4,7 +4,7 @@ import numpy as np
 import pyarrow.parquet as pq
 import pytest
 
-from podsearch.core import fetch, lance_store
+from podsearch.core import lance_store, rss_store
 
 RSS = """<?xml version="1.0"?>
 <rss version="2.0"><channel><title>Pod A</title>
@@ -49,7 +49,7 @@ def _write_part(
             "language": lang,
         }
     ]
-    pq.write_table(fetch._part_table(records), rss_dir / f"part-{seq:04d}.parquet")
+    pq.write_table(rss_store.part_table(records), rss_dir / f"part-{seq:04d}.parquet")
 
 
 def test_ingest_and_search_roundtrip(tmp_path) -> None:

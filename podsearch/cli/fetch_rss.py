@@ -1,11 +1,13 @@
 """podsearch-fetch-rss: select catalog feeds and fetch their RSS into parquet parts."""
 
 import argparse
+import logging
 from pathlib import Path
 
 from podsearch.core import catalog
-from podsearch.core.fetch import fetch_rss, prune_parts
+from podsearch.core.fetch import PER_HOST, fetch_rss
 from podsearch.core.paths import CATALOG_DB, RSS_DIR
+from podsearch.core.rss_store import prune_parts
 
 
 def main() -> None:
@@ -44,12 +46,16 @@ def main() -> None:
     )
     parser.add_argument("--concurrency", type=int, default=32, help="parallel feed fetches")
     parser.add_argument(
+        "--per-host", type=int, default=PER_HOST, help="parallel fetches per feed host"
+    )
+    parser.add_argument(
         "--prune-days",
         type=int,
         default=14,
         help="delete parquet parts older than this many days (0 disables)",
     )
     args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     feeds = catalog.select_feeds(
         args.db,
         langs=tuple(lang for arg in (args.lang or ["en", "de"]) for lang in arg.split(",") if lang),
@@ -58,10 +64,9 @@ def main() -> None:
         limit=args.feeds,
         order=args.order,
     )
-    stats = fetch_rss(feeds, args.rss_dir, args.concurrency)
+    stats = fetch_rss(feeds, args.rss_dir, args.concurrency, per_host=args.per_host)
     print(
-        f"selected {stats['selected']}, pending {stats['pending']}, "
-        f"ok {stats['ok']}, failed {stats['failed']}"
+        f"selected {stats.selected}, pending {stats.pending}, ok {stats.ok}, failed {stats.failed}"
     )
     if args.prune_days > 0:
         removed = prune_parts(args.rss_dir, args.prune_days)

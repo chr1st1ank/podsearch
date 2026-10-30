@@ -18,8 +18,9 @@ from pathlib import Path
 import polars as pl
 from qdrant_client import QdrantClient, models
 
-from podsearch.core import index, ingest_common
+from podsearch.core import index, ingest_common, rss_store
 from podsearch.core.index import ENCODE_BATCH, MAX_CHUNKS_PER_EPISODE, Hit
+from podsearch.core.parse import Parser
 from podsearch.core.paths import QDRANT_URL, RSS_DIR
 
 CHUNKS_COLLECTION = "chunks"
@@ -96,7 +97,7 @@ def ingest_parts(
     rss_dir: Path = RSS_DIR,
     client: QdrantClient | None = None,
     max_per_feed: int = 300,
-    parser_impl: str = "rs",
+    parser_impl: Parser = "rs",
     max_chunks: int = MAX_CHUNKS_PER_EPISODE,
     rebuild: bool = False,
     max_parts: int | None = None,
@@ -108,14 +109,14 @@ def ingest_parts(
             client.delete_collection(name)
     _ensure_parts(client)
     done = _done_parts(client)
-    parts = [p for p in sorted(rss_dir.glob("part-*.parquet")) if p.name not in done][:max_parts]
+    parts = [p for p in rss_store.list_parts(rss_dir) if p.name not in done][:max_parts]
     stats = {"parts": 0, "chunks": 0, "skipped": len(done), "stale": 0}
     if not parts:
         return stats
 
     dim = len(model.encode(["dimension probe"])[0])
     _ensure_collections(client, dim)
-    latest = ingest_common.latest_fetch_dates(rss_dir)
+    latest = rss_store.latest_fetch_dates(rss_dir)
     parse = partial(ingest_common.parse_feed, max_episodes=max_per_feed, impl=parser_impl)
     for px, part in enumerate(parts):
         t0 = time.perf_counter()

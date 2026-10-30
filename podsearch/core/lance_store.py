@@ -19,8 +19,9 @@ import numpy as np
 import polars as pl
 import pyarrow as pa
 
-from podsearch.core import index, ingest_common
+from podsearch.core import index, ingest_common, rss_store
 from podsearch.core.index import ENCODE_BATCH, MAX_CHUNKS_PER_EPISODE, Hit
+from podsearch.core.parse import Parser
 from podsearch.core.paths import LANCE_DIR, RSS_DIR
 
 if TYPE_CHECKING:
@@ -104,7 +105,7 @@ def ingest_parts(
     rss_dir: Path = RSS_DIR,
     path: Path = LANCE_DIR,
     max_per_feed: int = 300,
-    parser_impl: str = "rs",
+    parser_impl: Parser = "rs",
     max_chunks: int = MAX_CHUNKS_PER_EPISODE,
     rebuild: bool = False,
     max_parts: int | None = None,
@@ -116,7 +117,7 @@ def ingest_parts(
             db.drop_table(name)
     parts_tbl = db.create_table(PARTS_TABLE, schema=PARTS_SCHEMA, exist_ok=True)
     done = set(parts_tbl.to_arrow().column("path").to_pylist())
-    parts = [p for p in sorted(rss_dir.glob("part-*.parquet")) if p.name not in done][:max_parts]
+    parts = [p for p in rss_store.list_parts(rss_dir) if p.name not in done][:max_parts]
     stats = {"parts": 0, "chunks": 0, "skipped": len(done), "stale": 0}
     if not parts:
         return stats
@@ -124,7 +125,7 @@ def ingest_parts(
     dim = len(model.encode(["dimension probe"])[0])
     tbl = db.create_table(CHUNKS_TABLE, schema=_chunks_schema(dim), exist_ok=True)
     _ensure_btree(tbl)
-    latest = ingest_common.latest_fetch_dates(rss_dir)
+    latest = rss_store.latest_fetch_dates(rss_dir)
     parse = partial(ingest_common.parse_feed, max_episodes=max_per_feed, impl=parser_impl)
     for px, part in enumerate(parts):
         t0 = time.perf_counter()
