@@ -47,6 +47,7 @@ def _chunks_schema(dim: int) -> pa.Schema:
             ("link", pa.string()),
             ("pubdate", pa.int64()),
             ("text", pa.string()),
+            ("language", pa.string()),
             ("vector", pa.list_(pa.float32(), dim)),
         ]
     )
@@ -127,7 +128,13 @@ def ingest_parts(
     parse = partial(ingest_common.parse_feed, max_episodes=max_per_feed, impl=parser_impl)
     for px, part in enumerate(parts):
         t0 = time.perf_counter()
-        raw = pl.read_parquet(part, columns=["url", "title", "rss", "fetch_date"])
+        # parts written before ADR-0001 lack the language column -> 'und'
+        cols = ["url", "title", "rss", "fetch_date"]
+        if "language" in pl.read_parquet_schema(part):
+            cols.append("language")
+        raw = pl.read_parquet(part, columns=cols)
+        if "language" not in raw.columns:
+            raw = raw.with_columns(pl.lit(None).cast(pl.String).alias("language"))
         # stale (superseded by a newer part) or failed (no body): leave stored rows alone
         feeds = raw.join(latest, on="url").filter(
             pl.col("rss").is_not_null() & (pl.col("fetch_date") >= pl.col("latest"))
@@ -139,7 +146,7 @@ def ingest_parts(
         )
         episodes = [
             ep
-            for feed in feeds.select("url", "title", "rss").iter_rows(named=True)
+            for feed in feeds.select("url", "title", "rss", "language").iter_rows(named=True)
             for ep in parse(feed)
         ]
         chunks = ingest_common.chunk_episodes(episodes, max_chunks)
@@ -168,13 +175,18 @@ def ingest_parts(
     return stats
 
 
-def search(tbl: Table, model, reranker, q: str, k: int = 5) -> list[Hit]:
-    """Vector search; rows carry all metadata so hits need no hydration."""
-    q_vec = np.asarray(model.encode_query([q])[0], dtype=np.float32)
+def search(tbl: Table, model, reranker, q: str, lang: str, k: int = 5) -> list[Hit]:
+    """Vector search scoped to one language; no hydration step needed."""
+    q_vec = np.asarray(model.encode([q])[0], dtype=np.float32)
     # stubs type search() as LanceQueryBuilder; a vector query yields the
     # vector builder that has .metric()
     builder = cast("LanceVectorQueryBuilder", tbl.search(q_vec))
-    rows = builder.metric("cosine").limit(index.rerank_limit(k)).to_list()
+    rows = (
+        builder.metric("cosine")
+        .where(f"language = '{lang.replace(chr(39), chr(39) * 2)}'")
+        .limit(index.rerank_limit(k))
+        .to_list()
+    )
     candidates = [
         Hit(
             podcast=r["podcast"],
@@ -185,6 +197,7 @@ def search(tbl: Table, model, reranker, q: str, k: int = 5) -> list[Hit]:
             pubdate=r["pubdate"],
             feed_url=r["feed_url"],
             guid=r["guid"],
+            language=r["language"],
         )
         for r in rows
     ]

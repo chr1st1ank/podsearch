@@ -6,7 +6,7 @@ This file helps AI agents work effectively in the `podsearch` repository.
 
 Semantic search over podcast episodes. Feed metadata comes from the Podcast Index
 catalog, episode text is fetched via RSS, embedded locally with
-`intfloat/multilingual-e5-small` (384-dim, sentence-transformers), and searched through
+`minishlab/potion-multilingual-128M` (256-dim, model2vec), and searched through
 four swappable backends: `naive`, `numpy`, `lancedb`, `qdrant`. A FastAPI service and a
 CLI suite sit on top. Python 3.15, uv/hatchling, flat layout (`podsearch/` at root).
 
@@ -30,6 +30,9 @@ CLI suite sit on top. Python 3.15, uv/hatchling, flat layout (`podsearch/` at ro
 - `core/` must not import from `cli/` or `api`.
 - `--impl` selects the storage/search backend (`naive|numpy|lancedb|qdrant`);
   `--parser` selects the feed parser (`feedparser|rs`).
+- Search is language-scoped (ADR-0001): `lang` is a required argument on every
+  search path and restricts candidates to same-language chunks. Feed-declared
+  `language` propagates catalog → parquet parts → episodes → chunks.
 - All search impls share the retrieve-then-rerank flow: overfetch `max(6k, 30)` chunks,
   cross-encoder `index.rerank` (`cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`,
   sigmoid scores), then `dedup_hits`.
@@ -62,7 +65,7 @@ task index        # build vectors.f32
 task qdrant-up    # start Qdrant on :6333 (needed for qdrant tests/impl)
 task dagu         # Dagu web UI on :8081
 task serve        # FastAPI on :8000
-task bench        # search benchmark
+task bench        # search benchmark (--lang defaults to en)
 task update-dependencies  # upgrade locks + hooks within cooldown, then check
 ```
 

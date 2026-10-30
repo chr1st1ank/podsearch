@@ -9,10 +9,15 @@ Semantic search over podcast episodes. Four search implementations:
 - `qdrant`: Qdrant server in Docker (`qdrant_store.search`) — same fused layout as lancedb,
   vectors + payload in one collection, server-side HNSW
 
-Model: `intfloat/multilingual-e5-small` via sentence-transformers (384 dims, `query:`/`passage:`
-prefixes; downloads ~470 MB from Hugging Face on first use, cached afterwards). Corpus: podcast episodes selected from
+Model: `minishlab/potion-multilingual-128M` via model2vec (256 dims, static
+subword embeddings — fast encode, ~4k chunks/s). Corpus: podcast episodes selected from
 the Podcast Index catalog and fetched via RSS. Index: `data/vectors.f32` (raw float32 matrix,
 memory-mapped) + `data/corpus.db` (SQLite: episodes, chunks, ingest bookkeeping).
+
+Search is **language-scoped** ([ADR-0001](docs/decisions/0001-static-embeddings-language-scoped-search.md)):
+every query runs within one feed-declared language — `--lang`/`lang` is required
+on all entry points and only same-language chunks are scored. The Podcast Index
+catalog's feed `language` propagates through ingest into every chunk row.
 
 Every search is two-stage retrieve + rerank: the vector search overfetches
 `max(6k, 30)` candidate chunks, then a cross-encoder
@@ -100,12 +105,12 @@ Storage layout (all under gitignored `data/`):
 - `podcastindex_feeds.db` — feed catalog (4.7M feeds; metadata only, no episode content)
 - `rss/part-*.parquet` — raw RSS bodies + `fetch_date` + all catalog columns per feed;
   append-only history, parts pruned after 14 days (pruned feeds get refetched)
-- `corpus.db` — `episodes` (feed_url, guid, podcast, title, link, pubdate, text;
-  upserts on refetch so it mirrors the latest stored feed version),
-  `chunks` (vector_row, episode_id, text), `ingested_parts`, `meta`
+- `corpus.db` — `episodes` (feed_url, guid, podcast, title, link, pubdate, text,
+  language; upserts on refetch so it mirrors the latest stored feed version),
+  `chunks` (vector_row, episode_id, text, language), `ingested_parts`, `meta`
 - `vectors.f32` — raw float32 matrix aligned with `chunks.vector_row`
 - `lancedb/` — alternative store: one `chunks` table (vector + feed_url, guid,
-  podcast, episode, link, pubdate, text) + `ingested_parts`; ANN index
+  podcast, episode, link, pubdate, text, language) + `ingested_parts`; ANN index
   (HNSW-SQ cosine) is built once the table is large enough to train
 - `qdrant/` — Qdrant server storage (compose volume): `chunks` collection (vector +
   same payload) and `ingested_parts`
@@ -125,23 +130,23 @@ dep behind `python_version < "3.15"` — no cp315 wheels exist.)
 ## Search
 
 ```bash
-uv run podsearch-query "startup fundraising advice"
-uv run podsearch-query "startup fundraising advice" --impl numpy
-uv run podsearch-query "startup fundraising advice" --impl lancedb
-uv run podsearch-query "startup fundraising advice" --impl qdrant
+uv run podsearch-query "startup fundraising advice" --lang en
+uv run podsearch-query "startup fundraising advice" --lang en --impl numpy
+uv run podsearch-query "startup fundraising advice" --lang en --impl lancedb
+uv run podsearch-query "startup fundraising advice" --lang en --impl qdrant
 
 # benchmark: queries from podsearch/queries.txt
-uv run podsearch-bench --queries 2                 # naive: slow on purpose
-uv run podsearch-bench --impl numpy --queries 20 --repeat 100
-uv run podsearch-bench --impl lancedb --queries 20
-uv run podsearch-bench --impl qdrant --queries 20
+uv run podsearch-bench --lang en --queries 2                # naive: slow on purpose
+uv run podsearch-bench --lang en --impl numpy --queries 20 --repeat 100
+uv run podsearch-bench --lang en --impl lancedb --queries 20
+uv run podsearch-bench --lang en --impl qdrant --queries 20
 
 # web service (attach target)
 uv run podsearch-serve                                  # serves :8000
 
 # load generator (run in a second terminal)
-uv run podsearch-load --duration 30 --concurrency 4
-uv run podsearch-load --url http://127.0.0.1:8000/search-async --duration 30
+uv run podsearch-load --lang en --duration 30 --concurrency 4
+uv run podsearch-load --lang en --url http://127.0.0.1:8000/search-async --duration 30
 ```
 
 The `-m` form also works (`uv run python -m podsearch.cli.bench`,
@@ -174,12 +179,12 @@ uv run python -m profiling.sampling run --mode=wall -m podsearch.cli.fetch_rss -
 uv run python -m profiling.sampling run --mode=cpu  -m podsearch.cli.fetch_rss --rss-dir data/rss-prof --feeds 500
 uv run python -m profiling.sampling run --mode=gil  -m podsearch.cli.fetch_rss --rss-dir data/rss-prof --feeds 500
 
-# index: e5 encode — native frames under the Python stack
+# index: model2vec encode — native frames under the Python stack
 uv run python -m profiling.sampling run --native --flamegraph -o results/index-native.html -m podsearch.cli.indexing --vectors data/vectors-prof.f32
 uv run python -m profiling.sampling run --native --heatmap -o results/index-heat -m podsearch.cli.indexing --vectors data/vectors-prof.f32
 
 # query: a single naive search — "why is this slow?"
-uv run python -m profiling.sampling run --flamegraph -o results/query.html -m podsearch.cli.query "startup fundraising advice"
+uv run python -m profiling.sampling run --flamegraph -o results/query.html -m podsearch.cli.query "startup fundraising advice" --lang en
 
 # record binary, replay to another format
 uv run python -m profiling.sampling run --binary -o results/ingest.bin -m podsearch.cli.ingest --db data/corpus-prof.db

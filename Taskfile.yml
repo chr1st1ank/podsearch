@@ -92,7 +92,7 @@ tasks:
   bench:
     desc: Run the search benchmark (profiling target)
     cmds:
-      - uv run podsearch-bench {{.CLI_ARGS}}
+      - uv run podsearch-bench --lang en {{.CLI_ARGS}}
 
   serve:
     desc: Run the FastAPI service on :8000 (attach target)
@@ -102,7 +102,7 @@ tasks:
   load:
     desc: Generate load against the service
     cmds:
-      - uv run podsearch-load {{.CLI_ARGS}}
+      - uv run podsearch-load --lang en {{.CLI_ARGS}}
 
   update-dependencies:
     desc: Upgrade locked dependencies and hook revisions (7-day cooldown)

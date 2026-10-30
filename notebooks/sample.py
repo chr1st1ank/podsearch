@@ -335,16 +335,17 @@ def lance_model(index):
 @app.cell
 def lance_query(mo):
     query = mo.ui.text(value="Home Assistant", label="query")
+    lang = mo.ui.dropdown(["en", "de"], value="en", label="lang")
     run = mo.ui.run_button(label="search")
-    mo.vstack([query, run])
-    return query, run
+    mo.vstack([query, lang, run])
+    return lang, query, run
 
 
 @app.cell
-def lance_search(lance_store, lance_tbl, load, load_reranker, mo, pl, query, run, shorten):
+def lance_search(lance_store, lance_tbl, load, load_reranker, mo, pl, lang, query, run, shorten):
     mo.stop(lance_tbl is None, mo.md("_no lancedb store_"))
     mo.stop(not run.value, mo.md("_press search_"))
-    _hits = lance_store.search(lance_tbl, load(), load_reranker(), query.value, k=10)
+    _hits = lance_store.search(lance_tbl, load(), load_reranker(), query.value, lang.value, k=10)
     mo.vstack(
         [
             mo.md(f"### hits for `{query.value}`"),

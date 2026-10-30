@@ -61,13 +61,15 @@ CREATE TABLE IF NOT EXISTS episodes(
     link TEXT,
     pubdate INTEGER,
     text TEXT NOT NULL,
+    language TEXT NOT NULL DEFAULT 'und',
     UNIQUE(feed_url, guid)
 );
 CREATE TABLE IF NOT EXISTS chunks(
     id INTEGER PRIMARY KEY,
     vector_row INTEGER NOT NULL,
     episode_id INTEGER NOT NULL REFERENCES episodes(id),
-    text TEXT NOT NULL
+    text TEXT NOT NULL,
+    language TEXT NOT NULL DEFAULT 'und'
 );
 CREATE TABLE IF NOT EXISTS ingested_parts(
     path TEXT PRIMARY KEY,
@@ -88,12 +90,17 @@ def open_corpus(path: Path = CORPUS_DB) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.executescript(_SCHEMA)
+    # ADR-0001: language column was added after first corpora existed
+    for table in ("episodes", "chunks"):
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if "language" not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN language TEXT NOT NULL DEFAULT 'und'")
     return conn
 
 
 def iter_episodes(conn: sqlite3.Connection):
-    """Yield (episode_id, text) for indexing."""
-    yield from conn.execute("SELECT id, text FROM episodes ORDER BY id")
+    """Yield (episode_id, text, language) for indexing."""
+    yield from conn.execute("SELECT id, text, language FROM episodes ORDER BY id")
 
 
 def ingest_parts(
@@ -114,19 +121,25 @@ def ingest_parts(
         stats = {"parts": 0, "episodes": 0, "skipped": len(done), "stale": 0}
         for px, part in enumerate(parts):
             print(f"Processing part {px + 1}/{len(parts)}")
-            table = pq.read_table(part, columns=["url", "title", "rss", "fetch_date"])
+            # parts written before ADR-0001 lack the language column -> 'und'
+            cols = ["url", "title", "rss", "fetch_date"]
+            if "language" in pq.read_schema(part).names:
+                cols.append("language")
+            table = pq.read_table(part, columns=cols)
+            langs = table["language"].to_pylist() if "language" in cols else [None] * table.num_rows
             rows = []
-            for url, podcast, body, fetch_date in zip(
+            for url, podcast, body, fetch_date, language in zip(
                 table["url"].to_pylist(),
                 table["title"].to_pylist(),
                 table["rss"].to_pylist(),
                 table["fetch_date"].to_pylist(),
+                langs,
                 strict=True,
             ):
                 if body is None or fetch_date < latest[url]:
                     stats["stale"] += body is not None
                     continue
-                for ep in fetch.parse_feed(body, url, podcast or "", max_per_feed, impl):
+                for ep in fetch.parse_feed(body, url, podcast or "", max_per_feed, impl, language):
                     text = strip_html(f"{ep['title']}\n\n{ep['description']}")
                     if not text:
                         continue
@@ -139,15 +152,17 @@ def ingest_parts(
                             ep["link"],
                             ep["pubdate"],
                             text,
+                            ep["language"],
                         )
                     )
             conn.executemany(
                 "INSERT INTO episodes"
-                "(feed_url, guid, podcast, title, link, pubdate, text)"
-                " VALUES (?,?,?,?,?,?,?)"
+                "(feed_url, guid, podcast, title, link, pubdate, text, language)"
+                " VALUES (?,?,?,?,?,?,?,?)"
                 " ON CONFLICT(feed_url, guid) DO UPDATE SET"
                 " podcast=excluded.podcast, title=excluded.title,"
-                " link=excluded.link, pubdate=excluded.pubdate, text=excluded.text",
+                " link=excluded.link, pubdate=excluded.pubdate, text=excluded.text,"
+                " language=excluded.language",
                 rows,
             )
             conn.execute(

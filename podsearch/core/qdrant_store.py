@@ -54,6 +54,7 @@ def _ensure_collections(client: QdrantClient, dim: int) -> None:
         )
         client.create_payload_index(CHUNKS_COLLECTION, "feed_url", models.PayloadSchemaType.KEYWORD)
         client.create_payload_index(CHUNKS_COLLECTION, "guid", models.PayloadSchemaType.KEYWORD)
+        client.create_payload_index(CHUNKS_COLLECTION, "language", models.PayloadSchemaType.KEYWORD)
 
 
 def episode_count(client: QdrantClient) -> int:
@@ -118,7 +119,13 @@ def ingest_parts(
     parse = partial(ingest_common.parse_feed, max_episodes=max_per_feed, impl=parser_impl)
     for px, part in enumerate(parts):
         t0 = time.perf_counter()
-        raw = pl.read_parquet(part, columns=["url", "title", "rss", "fetch_date"])
+        # parts written before ADR-0001 lack the language column -> 'und'
+        cols = ["url", "title", "rss", "fetch_date"]
+        if "language" in pl.read_parquet_schema(part):
+            cols.append("language")
+        raw = pl.read_parquet(part, columns=cols)
+        if "language" not in raw.columns:
+            raw = raw.with_columns(pl.lit(None).cast(pl.String).alias("language"))
         feeds = raw.join(latest, on="url").filter(
             pl.col("rss").is_not_null() & (pl.col("fetch_date") >= pl.col("latest"))
         )
@@ -129,7 +136,7 @@ def ingest_parts(
         )
         episodes = [
             ep
-            for feed in feeds.select("url", "title", "rss").iter_rows(named=True)
+            for feed in feeds.select("url", "title", "rss", "language").iter_rows(named=True)
             for ep in parse(feed)
         ]
         chunks = ingest_common.chunk_episodes(episodes, max_chunks)
@@ -175,11 +182,17 @@ def ingest_parts(
     return stats
 
 
-def search(client: QdrantClient, model, reranker, q: str, k: int = 5) -> list[Hit]:
-    """Vector search; payload carries all metadata so hits need no hydration."""
-    vec = [float(x) for x in model.encode_query([q])[0]]
+def search(client: QdrantClient, model, reranker, q: str, lang: str, k: int = 5) -> list[Hit]:
+    """Vector search scoped to one language; payload carries all metadata."""
+    vec = [float(x) for x in model.encode([q])[0]]
     res = client.query_points(
-        CHUNKS_COLLECTION, query=vec, limit=index.rerank_limit(k), with_payload=True
+        CHUNKS_COLLECTION,
+        query=vec,
+        limit=index.rerank_limit(k),
+        query_filter=models.Filter(
+            must=[models.FieldCondition(key="language", match=models.MatchValue(value=lang))]
+        ),
+        with_payload=True,
     )
     candidates = [
         Hit(
@@ -191,6 +204,7 @@ def search(client: QdrantClient, model, reranker, q: str, k: int = 5) -> list[Hi
             pubdate=p.payload["pubdate"],
             feed_url=p.payload["feed_url"],
             guid=p.payload["guid"],
+            language=p.payload.get("language", ""),
         )
         for p in res.points
         if p.payload is not None

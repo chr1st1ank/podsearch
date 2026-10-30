@@ -19,6 +19,7 @@ def main() -> None:
     )
     parser.add_argument("--repeat", type=int, default=1, help="repetitions of the query set")
     parser.add_argument("-k", type=int, default=5, help="hits per query")
+    parser.add_argument("--lang", required=True, help="language code to search within (ADR-0001)")
     parser.add_argument(
         "--impl", choices=common.IMPLS, default="naive", help="search implementation"
     )
@@ -36,7 +37,7 @@ def main() -> None:
     t0 = time.perf_counter()
     for _rep in range(args.repeat):
         for q in queries:
-            search(store, model, reranker, q, args.k)
+            search(store, model, reranker, q, args.lang, args.k)
     elapsed = time.perf_counter() - t0
     n = len(queries) * args.repeat
     print(f"{n} queries in {elapsed:.1f} s ({elapsed / n:.2f} s/query)")

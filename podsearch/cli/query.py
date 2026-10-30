@@ -14,6 +14,7 @@ def main() -> None:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("q", help="query text")
+    parser.add_argument("--lang", required=True, help="language code to search within (ADR-0001)")
     parser.add_argument("-k", type=int, default=5, help="number of hits to show")
     parser.add_argument(
         "--impl", choices=common.IMPLS, default="naive", help="search implementation"
@@ -27,7 +28,7 @@ def main() -> None:
     store = common.open_store(args.impl, args.lance_dir, args.qdrant_url)
     model = index.load_model()
     reranker = index.load_reranker()
-    hits = common.search_fn(args.impl)(store, model, reranker, args.q, args.k)
+    hits = common.search_fn(args.impl)(store, model, reranker, args.q, args.lang, args.k)
     for hit in sorted(hits, key=lambda h: h.score, reverse=True):
         print(common.fmt_hit(hit))
 

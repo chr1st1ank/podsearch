@@ -19,6 +19,7 @@ def main() -> None:
     parser.add_argument("--url", default="http://127.0.0.1:8000/search", help="endpoint to hit")
     parser.add_argument("--duration", type=float, default=30, help="load duration in seconds")
     parser.add_argument("--concurrency", type=int, default=4, help="worker threads")
+    parser.add_argument("--lang", required=True, help="language code to search within (ADR-0001)")
     args = parser.parse_args()
 
     queries = [q for q in QUERIES_PATH.read_text().splitlines() if q.strip()]
@@ -31,7 +32,7 @@ def main() -> None:
         i = tid
         while time.perf_counter() < stop_at:
             t0 = time.perf_counter()
-            r = client.get(args.url, params={"q": queries[i % len(queries)]})
+            r = client.get(args.url, params={"q": queries[i % len(queries)], "lang": args.lang})
             ms = (time.perf_counter() - t0) * 1000
             if r.status_code == 200:
                 with lock:

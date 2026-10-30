@@ -30,7 +30,7 @@ def open_store(impl: str, lance_dir: Path | None = None, qdrant_url: str | None 
             raise ValueError(f"unknown impl: {impl}")
 
 
-def search_fn(impl: str) -> Callable[[Any, Any, Any, str, int], list[index.Hit]]:
+def search_fn(impl: str) -> Callable[[Any, Any, Any, str, str, int], list[index.Hit]]:
     match impl:
         case "naive":
             return index.search
@@ -44,17 +44,31 @@ def search_fn(impl: str) -> Callable[[Any, Any, Any, str, int], list[index.Hit]]
             raise ValueError(f"unknown impl: {impl}")
 
 
-def stats(impl: str, store: Any) -> dict[str, int | None]:
-    """Chunk/episode counts for a store, for display in the UI."""
+def stats(impl: str, store: Any) -> dict[str, int | list[str] | None]:
+    """Chunk/episode counts and languages for a store, for display in the UI."""
     match impl:
         case "lancedb":
-            eps = store.search().select(["feed_url", "guid"]).to_polars().unique().height
-            return {"episodes": eps, "chunks": store.count_rows()}
+            col = store.search().select(["feed_url", "guid", "language"]).to_polars()
+            eps = col.select(["feed_url", "guid"]).unique().height
+            return {
+                "episodes": eps,
+                "chunks": store.count_rows(),
+                "languages": sorted(col["language"].unique().to_list()),
+            }
         case "qdrant":
+            hits = store.facet(qdrant_store.CHUNKS_COLLECTION, key="language", limit=256).hits
             return {
                 "episodes": qdrant_store.episode_count(store),
                 "chunks": store.count(qdrant_store.CHUNKS_COLLECTION).count,
+                "languages": sorted(h.value for h in hits),
             }
         case _:
             eps = store.conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
-            return {"episodes": eps, "chunks": int(store.vectors.shape[0])}
+            langs = [
+                r[0] for r in store.conn.execute("SELECT DISTINCT language FROM chunks ORDER BY 1")
+            ]
+            return {
+                "episodes": eps,
+                "chunks": int(store.vectors.shape[0]),
+                "languages": langs,
+            }

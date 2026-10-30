@@ -48,11 +48,11 @@ def test_cosine_zero_vector() -> None:
 def _tiny_corpus(db_path):
     conn = corpus.open_corpus(db_path)
     conn.executemany(
-        "INSERT INTO episodes(feed_url, guid, podcast, title, link, pubdate, text)"
-        " VALUES (?,?,?,?,?,?,?)",
+        "INSERT INTO episodes(feed_url, guid, podcast, title, link, pubdate, text, language)"
+        " VALUES (?,?,?,?,?,?,?,?)",
         [
-            ("u1", "g1", "Pod A", "Episode one", "l1", 0, "alpha beta gamma"),
-            ("u1", "g2", "Pod B", "Episode two", "l2", 0, "delta epsilon"),
+            ("u1", "g1", "Pod A", "Episode one", "l1", 0, "alpha beta gamma", "en"),
+            ("u1", "g2", "Pod B", "Episode two", "l2", 0, "delta epsilon", "en"),
         ],
     )
     conn.commit()
@@ -68,14 +68,42 @@ def test_build_and_search_roundtrip(tmp_path) -> None:
     conn.close()
 
     idx = index.load(vectors, db)
-    hits = index.search_numpy(idx, FakeModel([1.0, 0.0]), FakeReranker(), "q")
+    hits = index.search_numpy(idx, FakeModel([1.0, 0.0]), FakeReranker(), "q", "en")
     assert len(hits) == 2
     assert hits[0].score == pytest.approx(1.0)
     assert {h.podcast for h in hits} == {"Pod A", "Pod B"}
 
-    hits = index.search(idx, FakeModel([1.0, 0.0]), FakeReranker(), "q", k=1)
+    hits = index.search(idx, FakeModel([1.0, 0.0]), FakeReranker(), "q", "en", k=1)
     assert len(hits) == 1
     assert hits[0].episode in {"Episode one", "Episode two"}
+    idx.conn.close()
+
+
+def test_search_filters_by_language(tmp_path) -> None:
+    """ADR-0001: lang restricts candidates to same-language chunks."""
+    db = tmp_path / "corpus.db"
+    vectors = tmp_path / "vectors.f32"
+    conn = corpus.open_corpus(db)
+    conn.executemany(
+        "INSERT INTO episodes(feed_url, guid, podcast, title, link, pubdate, text, language)"
+        " VALUES (?,?,?,?,?,?,?,?)",
+        [
+            ("u1", "g1", "Pod A", "Alpha", "l1", 0, "alpha beta gamma", "en"),
+            ("u2", "g2", "Pod B", "Beta", "l2", 0, "delta epsilon", "de"),
+        ],
+    )
+    conn.commit()
+    index.build_index(conn, FakeModel([1.0, 0.0]), vectors)
+    conn.close()
+
+    idx = index.load(vectors, db)
+    for fn in (index.search, index.search_numpy):
+        hits = fn(idx, FakeModel([1.0, 0.0]), FakeReranker(), "q", "de")
+        assert [h.podcast for h in hits] == ["Pod B"]
+        assert hits[0].language == "de"
+        hits = fn(idx, FakeModel([1.0, 0.0]), FakeReranker(), "q", "en")
+        assert [h.podcast for h in hits] == ["Pod A"]
+        assert fn(idx, FakeModel([1.0, 0.0]), FakeReranker(), "q", "fr") == []
     idx.conn.close()
 
 
@@ -85,14 +113,14 @@ def test_search_dedups_chunks_of_one_episode(tmp_path) -> None:
     conn = _tiny_corpus(db)
     text = " ".join(["word"] * 250)
     conn.executemany(
-        "INSERT INTO episodes(feed_url, guid, podcast, title, link, pubdate, text)"
-        " VALUES (?,?,?,?,?,?,?)",
+        "INSERT INTO episodes(feed_url, guid, podcast, title, link, pubdate, text, language)"
+        " VALUES (?,?,?,?,?,?,?,?)",
         [
-            ("u2", "g3", "Pod C", "Episode three", "l3", 100, text),
+            ("u2", "g3", "Pod C", "Episode three", "l3", 100, text, "en"),
             # same episode republished on a sibling feed -> text dedup
-            ("u3", "g4", "Pod C HD", "Episode three", "l4", 100, text),
+            ("u3", "g4", "Pod C HD", "Episode three", "l4", 100, text, "en"),
             # same title on another day is a different episode -> stays
-            ("u4", "g5", "Pod D", "Episode three", "l5", 200, "delta epsilon"),
+            ("u4", "g5", "Pod D", "Episode three", "l5", 200, "delta epsilon", "en"),
         ],
     )
     conn.commit()
@@ -102,7 +130,7 @@ def test_search_dedups_chunks_of_one_episode(tmp_path) -> None:
 
     idx = index.load(vectors, db)
     for fn in (index.search, index.search_numpy):
-        hits = fn(idx, FakeModel([1.0, 0.0]), FakeReranker(), "q", k=5)
+        hits = fn(idx, FakeModel([1.0, 0.0]), FakeReranker(), "q", "en", k=5)
         assert [h.episode for h in hits].count("Episode three") == 2
         kept = {(h.podcast, h.pubdate) for h in hits if h.episode == "Episode three"}
         assert ("Pod D", 200) in kept
@@ -128,15 +156,15 @@ def test_search_numpy_zero_norm_rows(tmp_path) -> None:
     vectors = tmp_path / "vectors.f32"
     conn = _tiny_corpus(db)
     conn.execute(
-        "INSERT INTO episodes(feed_url, guid, podcast, title, link, pubdate, text)"
-        " VALUES ('u2', 'g3', 'Pod C', 'Episode three', 'l3', 0, 'zword')"
+        "INSERT INTO episodes(feed_url, guid, podcast, title, link, pubdate, text, language)"
+        " VALUES ('u2', 'g3', 'Pod C', 'Episode three', 'l3', 0, 'zword', 'en')"
     )
     conn.commit()
     index.build_index(conn, ZeroVecModel(), vectors)
     conn.close()
 
     idx = index.load(vectors, db)
-    hits = index.search_numpy(idx, ZeroVecModel(), FakeReranker(), "q", k=3)
+    hits = index.search_numpy(idx, ZeroVecModel(), FakeReranker(), "q", "en", k=3)
     assert all(h.score == h.score for h in hits)  # no NaN scores
     assert hits[-1].podcast == "Pod C"  # worst stage-1 candidate stays last
     assert hits[-1].score == pytest.approx(1.0)  # FakeReranker score replaces it
@@ -153,7 +181,7 @@ def test_rerank_reorders_candidates(tmp_path) -> None:
 
     idx = index.load(vectors, db)
     for fn in (index.search, index.search_numpy):
-        hits = fn(idx, FakeModel([1.0, 0.0]), KeywordReranker("epsilon"), "q", k=1)
+        hits = fn(idx, FakeModel([1.0, 0.0]), KeywordReranker("epsilon"), "q", "en", k=1)
         assert [h.podcast for h in hits] == ["Pod B"]
         assert hits[0].score == pytest.approx(1.0)
     idx.conn.close()
@@ -166,8 +194,8 @@ def test_rerank_passage_formatting_and_snippet_truncate(tmp_path) -> None:
     conn = corpus.open_corpus(db)
     # real episodes store title + "\n\n" + body: chunk 1 repeats the title
     conn.execute(
-        "INSERT INTO episodes(feed_url, guid, podcast, title, link, pubdate, text)"
-        " VALUES ('u1', 'g1', 'Pod A', 'Episode one', 'l1', 0, ?)",
+        "INSERT INTO episodes(feed_url, guid, podcast, title, link, pubdate, text, language)"
+        " VALUES ('u1', 'g1', 'Pod A', 'Episode one', 'l1', 0, ?, 'en')",
         ("Episode one\n\n" + " ".join(["word"] * 300),),
     )
     conn.commit()
@@ -176,7 +204,7 @@ def test_rerank_passage_formatting_and_snippet_truncate(tmp_path) -> None:
 
     idx = index.load(vectors, db)
     reranker = KeywordReranker("word")
-    hits = index.search_numpy(idx, FakeModel([1.0, 0.0]), reranker, "q", k=5)
+    hits = index.search_numpy(idx, FakeModel([1.0, 0.0]), reranker, "q", "en", k=5)
     assert hits and all(len(h.snippet) <= 200 for h in hits)
 
     # every candidate passage is "<podcast> — <episode>\n\n<chunk text>"
@@ -199,13 +227,13 @@ def test_search_from_worker_thread(tmp_path) -> None:
     model = FakeModel([1.0, 0.0])
     with ThreadPoolExecutor(1) as pool:
         for fn in (index.search, index.search_numpy):
-            hits = pool.submit(fn, idx, model, FakeReranker(), "q").result()
+            hits = pool.submit(fn, idx, model, FakeReranker(), "q", "en").result()
             assert len(hits) == 2
     idx.conn.close()
 
 
 class RecordingModel:
-    """Records which encode path was taken - locks the query/passage split."""
+    """Records which encode path was taken - locks the single encode path."""
 
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -214,13 +242,9 @@ class RecordingModel:
         self.calls.append("encode")
         return np.tile(np.asarray([1.0, 0.0], dtype=np.float32), (len(texts), 1))
 
-    def encode_query(self, texts: list[str]) -> np.ndarray:
-        self.calls.append("encode_query")
-        return np.tile(np.asarray([1.0, 0.0], dtype=np.float32), (len(texts), 1))
 
-
-def test_search_uses_query_encoder(tmp_path) -> None:
-    """E5-style models need a query prefix; searches must call encode_query."""
+def test_search_uses_plain_encoder(tmp_path) -> None:
+    """model2vec has no query/passage split; searches must call encode."""
     db = tmp_path / "corpus.db"
     vectors = tmp_path / "vectors.f32"
     conn = _tiny_corpus(db)
@@ -230,6 +254,6 @@ def test_search_uses_query_encoder(tmp_path) -> None:
     idx = index.load(vectors, db)
     for fn in (index.search, index.search_numpy):
         model = RecordingModel()
-        fn(idx, model, FakeReranker(), "q", k=1)
-        assert model.calls == ["encode_query"]
+        fn(idx, model, FakeReranker(), "q", "en", k=1)
+        assert model.calls == ["encode"]
     idx.conn.close()

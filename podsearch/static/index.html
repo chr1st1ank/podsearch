@@ -66,6 +66,15 @@
       border-color: transparent;
     }
 
+    select {
+      padding: .7rem .8rem;
+      font-size: 1.05rem;
+      color: inherit;
+      background: transparent;
+      border: 1px solid #9995;
+      border-radius: 999px;
+    }
+
     button {
       padding: .7rem 1.4rem;
       font-size: 1.05rem;
@@ -125,6 +134,7 @@
     <p id="info"></p>
   </header>
   <form id="f">
+    <select id="lang"></select>
     <input type="search" id="q" placeholder="Search podcast episodes…" autofocus required>
     <button type="submit">Search</button>
   </form>
@@ -133,9 +143,11 @@
   <script>
     const form = document.getElementById('f');
     const input = document.getElementById('q');
+    const lang = document.getElementById('lang');
     const status = document.getElementById('status');
     const results = document.getElementById('results');
     const fmt = n => n.toLocaleString('en-US');
+    const params = new URLSearchParams(location.search);
 
     fetch('/api/stats')
       .then(r => r.json())
@@ -144,15 +156,28 @@
         if (i.episodes != null) parts.push(`${fmt(i.episodes)} episodes`);
         parts.push(`${fmt(i.chunks)} chunks`);
         document.getElementById('info').textContent = parts.join(' · ');
+        const want = params.get('lang');
+        for (const l of (i.languages?.length ? i.languages : ['en', 'de'])) {
+          const o = document.createElement('option');
+          o.value = l; o.textContent = l;
+          lang.append(o);
+        }
+        lang.value = want ?? lang.options[0]?.value;
       })
-      .catch(() => { });
+      .catch(() => {
+        for (const l of ['en', 'de']) {
+          const o = document.createElement('option');
+          o.value = l; o.textContent = l;
+          lang.append(o);
+        }
+      });
 
     async function runSearch(q) {
       results.replaceChildren();
       status.textContent = 'searching…';
       const t0 = performance.now();
       try {
-        const r = await fetch('/search?q=' + encodeURIComponent(q) + '&k=10');
+        const r = await fetch('/search?q=' + encodeURIComponent(q) + '&lang=' + lang.value + '&k=10');
         const hits = await r.json();
         const secs = ((performance.now() - t0) / 1000).toFixed(2);
         status.textContent = `${hits.length} hits in ${secs} s`;
@@ -179,8 +204,8 @@
       e.preventDefault();
       const q = input.value.trim();
       if (!q) return;
-      if (new URLSearchParams(location.search).get('q') !== q)
-        history.pushState(null, '', '?q=' + encodeURIComponent(q));
+      const url = '?q=' + encodeURIComponent(q) + '&lang=' + lang.value;
+      if (location.search !== url) history.pushState(null, '', url);
       runSearch(q);
     });
 

@@ -51,15 +51,25 @@ def create_app(impl: str = "naive") -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/search")
-    def search(request: Request, q: str, k: int = 5) -> list[index.Hit]:
+    def search(request: Request, q: str, lang: str, k: int = 5) -> list[index.Hit]:
         return search_fn(
-            request.app.state.store, request.app.state.model, request.app.state.reranker, q, k
+            request.app.state.store,
+            request.app.state.model,
+            request.app.state.reranker,
+            q,
+            lang,
+            k,
         )
 
     @app.get("/search-async")
-    async def search_async(request: Request, q: str, k: int = 5) -> list[index.Hit]:
+    async def search_async(request: Request, q: str, lang: str, k: int = 5) -> list[index.Hit]:
         return search_fn(
-            request.app.state.store, request.app.state.model, request.app.state.reranker, q, k
+            request.app.state.store,
+            request.app.state.model,
+            request.app.state.reranker,
+            q,
+            lang,
+            k,
         )
 
     return app

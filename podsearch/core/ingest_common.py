@@ -16,8 +16,9 @@ EPISODE_COLUMNS = {
     "link": pl.String,
     "pubdate": pl.Int64,
     "description": pl.String,
+    "language": pl.String,
 }
-CHUNK_COLUMNS = ["feed_url", "guid", "podcast", "episode", "link", "pubdate", "text"]
+CHUNK_COLUMNS = ["feed_url", "guid", "podcast", "episode", "link", "pubdate", "text", "language"]
 
 
 def latest_fetch_dates(rss_dir: Path) -> pl.DataFrame:
@@ -31,7 +32,14 @@ def latest_fetch_dates(rss_dir: Path) -> pl.DataFrame:
 
 
 def parse_feed(feed: dict[str, Any], max_episodes: int, impl: str) -> list[dict[str, Any]]:
-    return fetch.parse_feed(feed["rss"], feed["url"], feed["title"] or "", max_episodes, impl)
+    return fetch.parse_feed(
+        feed["rss"],
+        feed["url"],
+        feed["title"] or "",
+        max_episodes,
+        impl,
+        feed.get("language"),
+    )
 
 
 def chunk_episodes(episodes: list[dict[str, Any]], max_chunks: int) -> pl.DataFrame:

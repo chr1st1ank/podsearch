@@ -93,6 +93,43 @@ def write_part(records: list[dict[str, Any]], rss_dir: Path, seq: int) -> Path:
     return path
 
 
+class _PartWriter:
+    """Streams fetched rows into part-*.parquet files of at most part_size rows.
+
+    A row group is flushed as each result arrives, so an RSS body stays alive
+    for a single loop iteration instead of accumulating a part in memory.
+    Parts land under their final name only on close, so a killed run leaves no
+    footer-less file behind.
+    """
+
+    def __init__(self, rss_dir: Path, seq: int, part_size: int) -> None:
+        self._rss_dir, self._seq, self._part_size = rss_dir, seq, part_size
+        self._schema = _part_table([]).schema
+        self._writer: pq.ParquetWriter | None = None
+        self._tmp: Path | None = None
+        self._n_part = 0
+        self._rows = 0
+
+    def write(self, record: dict[str, Any]) -> None:
+        if self._writer is None:
+            seq = self._seq * 10_000 + self._n_part
+            self._tmp = self._rss_dir / f"part-{seq:04d}.parquet.tmp"
+            self._writer = pq.ParquetWriter(self._tmp, self._schema)
+            self._n_part += 1
+            self._rows = 0
+        self._writer.write_table(_part_table([record]))
+        self._rows += 1
+        if self._rows >= self._part_size:
+            self.close()
+
+    def close(self) -> None:
+        if self._writer is None or self._tmp is None:
+            return
+        self._writer.close()
+        self._tmp.rename(self._tmp.with_suffix(""))
+        self._writer = None
+
+
 def fetch_rss(
     feeds: list[dict[str, Any]],
     rss_dir: Path = RSS_DIR,
@@ -106,35 +143,40 @@ def fetch_rss(
     if not pending:
         return stats
     seq = int(time.time())
-    n_part = 0
-    batch: list[dict[str, Any]] = []
+    parts = _PartWriter(rss_dir, seq, part_size)
     client = httpx.Client(headers=UA, follow_redirects=True)
-    with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        futures = {pool.submit(_fetch_one, client, f["url"]): f for f in pending}
-        for i, fut in enumerate(as_completed(futures), 1):
-            feed = futures[fut]
-            body = fut.result()
-            if body is None:
-                stats["failed"] += 1
-            else:
-                stats["ok"] += 1
-                batch.append(
-                    {
-                        **feed,
-                        "rss": body.decode("utf-8", errors="replace"),
-                        "fetch_date": int(time.time()),
-                    }
-                )
-            if len(batch) >= part_size:
-                write_part(batch, rss_dir, seq * 10_000 + n_part)
-                n_part += 1
-                batch = []
-            if i % 500 == 0:
-                print(f"  {i}/{len(pending)} fetched ({stats['failed']} failed)")
-    if batch:
-        write_part(batch, rss_dir, seq * 10_000 + n_part)
-    client.close()
+    try:
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
+            futures = {pool.submit(_fetch_one, client, f["url"]): f for f in pending}
+            for i, fut in enumerate(as_completed(futures), 1):
+                # pop, not index: finished futures retain their result - keeping the
+                # dict entry alive would hold every fetched RSS body until the end
+                feed = futures.pop(fut)
+                body = fut.result()
+                if body is None:
+                    stats["failed"] += 1
+                else:
+                    stats["ok"] += 1
+                    parts.write(
+                        {
+                            **feed,
+                            "rss": body.decode("utf-8", errors="replace"),
+                            "fetch_date": int(time.time()),
+                        }
+                    )
+                if i % 500 == 0:
+                    print(f"  {i}/{len(pending)} fetched ({stats['failed']} failed)")
+    finally:
+        parts.close()
+        client.close()
     return stats
+
+
+def lang_code(language: Any) -> str:
+    """Normalize a catalog language value to a primary subtag; 'und' if missing."""
+    if not language:
+        return "und"
+    return str(language).split("-")[0].strip().lower() or "und"
 
 
 def parse_feed(
@@ -143,6 +185,7 @@ def parse_feed(
     podcast: str,
     max_episodes: int | None = None,
     impl: str = "rs",
+    language: Any = None,
 ) -> list[dict[str, Any]]:
     """Parse one RSS body into episode dicts. Used by the ingest stage."""
     import calendar
@@ -152,6 +195,7 @@ def parse_feed(
     parsed = fp.parse(body, sanitize_html=False, resolve_relative_uris=False)
     feed_title = parsed.feed.get("title")
     podcast_name = podcast or (str(feed_title) if feed_title else "")
+    lang = lang_code(language)
     episodes: list[dict[str, Any]] = []
     entries = parsed.entries[:max_episodes] if max_episodes is not None else parsed.entries
     for entry in entries:
@@ -170,6 +214,7 @@ def parse_feed(
                 "link": entry.get("link") or "",
                 "pubdate": calendar.timegm(parsed_date) if parsed_date else 0,
                 "description": description,
+                "language": lang,
             }
         )
     return episodes

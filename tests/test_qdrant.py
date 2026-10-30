@@ -20,11 +20,26 @@ def test_ingest_and_search_roundtrip(env) -> None:
     stats = qdrant_store.ingest_parts(FakeModel(), rss_dir=rss_dir, client=client)
     assert stats["parts"] == 1 and stats["chunks"] > 0
 
-    hits = qdrant_store.search(client, FakeModel(), FakeReranker(), "query", k=5)
+    hits = qdrant_store.search(client, FakeModel(), FakeReranker(), "query", "en", k=5)
     assert len(hits) == 1
     assert hits[0].score == pytest.approx(1.0)
     assert (hits[0].podcast, hits[0].episode) == ("Pod A", "Episode one")
     assert hits[0].pubdate > 0
+
+
+def test_search_filters_by_language(env) -> None:
+    """ADR-0001: lang restricts candidates to same-language chunks."""
+    rss_dir, client = env
+    _write_part(rss_dir, 0, "u1", "Episode one", 1000, lang="en")
+    _write_part(rss_dir, 1, "u2", "Folge eins", 1000, lang="de")
+    qdrant_store.ingest_parts(FakeModel(), rss_dir=rss_dir, client=client)
+
+    hits = qdrant_store.search(client, FakeModel(), FakeReranker(), "query", "de")
+    assert [h.episode for h in hits] == ["Folge eins"]
+    assert hits[0].language == "de"
+    hits = qdrant_store.search(client, FakeModel(), FakeReranker(), "query", "en")
+    assert [h.episode for h in hits] == ["Episode one"]
+    assert qdrant_store.search(client, FakeModel(), FakeReranker(), "query", "fr") == []
 
 
 def test_search_dedups_chunks_of_one_episode(env) -> None:
@@ -33,7 +48,7 @@ def test_search_dedups_chunks_of_one_episode(env) -> None:
     stats = qdrant_store.ingest_parts(FakeModel(), rss_dir=rss_dir, client=client)
     assert stats["chunks"] == 2
 
-    hits = qdrant_store.search(client, FakeModel(), FakeReranker(), "query", k=5)
+    hits = qdrant_store.search(client, FakeModel(), FakeReranker(), "query", "en", k=5)
     assert [h.episode for h in hits] == ["Episode one"]
 
 
@@ -47,7 +62,7 @@ def test_ingest_idempotent_and_replace(env) -> None:
     _write_part(rss_dir, 1, "u1", "Episode one v2", 2000)
     stats = qdrant_store.ingest_parts(FakeModel(), rss_dir=rss_dir, client=client)
     assert stats["parts"] == 1
-    hits = qdrant_store.search(client, FakeModel(), FakeReranker(), "query", k=5)
+    hits = qdrant_store.search(client, FakeModel(), FakeReranker(), "query", "en", k=5)
     assert [h.episode for h in hits] == ["Episode one v2"]
 
 
@@ -57,4 +72,4 @@ def test_rebuild_reingests_everything(env) -> None:
     qdrant_store.ingest_parts(FakeModel(), rss_dir=rss_dir, client=client)
     stats = qdrant_store.ingest_parts(FakeModel(), rss_dir=rss_dir, client=client, rebuild=True)
     assert stats["parts"] == 1
-    assert len(qdrant_store.search(client, FakeModel(), FakeReranker(), "query")) == 1
+    assert len(qdrant_store.search(client, FakeModel(), FakeReranker(), "query", "en")) == 1

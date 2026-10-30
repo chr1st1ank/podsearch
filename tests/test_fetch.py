@@ -71,6 +71,47 @@ def test_pending_feeds_skips_stored(tmp_path) -> None:
     assert pending == {"https://b", "https://c"}
 
 
+def test_fetch_rss_writes_parts(tmp_path, monkeypatch) -> None:
+    """fetch_rss consumes each completed future and writes bounded-size parts."""
+    monkeypatch.setattr(fetch, "_fetch_one", lambda client, url: RSS)
+    rss_dir = tmp_path / "rss"
+    feeds = [_feed("https://a", 0), _feed("https://b", 0)]
+    stats = fetch.fetch_rss(feeds, rss_dir, part_size=1)
+    assert stats == {"selected": 2, "pending": 2, "ok": 2, "failed": 0}
+    parts = sorted(rss_dir.glob("part-*.parquet"))
+    assert len(parts) == 2  # part_size=1 -> one part per feed
+    assert pq.read_table(parts[0])["rss"].to_pylist() == [RSS.decode()]
+
+
+def test_fetch_rss_counts_failures(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(fetch, "_fetch_one", lambda client, url: None)
+    rss_dir = tmp_path / "rss"
+    stats = fetch.fetch_rss([_feed("https://a", 0)], rss_dir)
+    assert stats == {"selected": 1, "pending": 1, "ok": 0, "failed": 1}
+    assert list(rss_dir.glob("part-*.parquet")) == []
+
+
+def test_fetch_rss_error_leaves_valid_partial_part(tmp_path, monkeypatch) -> None:
+    """An exception mid-run must not leave a footer-less part behind."""
+
+    def flaky(client, url: str) -> bytes | None:
+        if url == "https://bad":
+            raise RuntimeError("boom")
+        return RSS
+
+    monkeypatch.setattr(fetch, "_fetch_one", flaky)
+    rss_dir = tmp_path / "rss"
+    feeds = [_feed("https://a", 0), _feed("https://bad", 0)]
+    import pytest
+
+    with pytest.raises(RuntimeError, match="boom"):
+        fetch.fetch_rss(feeds, rss_dir, concurrency=1)
+    assert list(rss_dir.glob("*.tmp")) == []
+    parts = sorted(rss_dir.glob("part-*.parquet"))
+    assert len(parts) == 1  # rows written before the error are still valid
+    assert pq.read_table(parts[0]).num_rows == 1
+
+
 def test_prune_parts_deletes_old(tmp_path) -> None:
     import os
     import time

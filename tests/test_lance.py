@@ -32,7 +32,13 @@ class FakeReranker:
 
 
 def _write_part(
-    rss_dir, seq: int, feed_url: str, title: str, fetch_date: int, desc: str = "alpha beta gamma"
+    rss_dir,
+    seq: int,
+    feed_url: str,
+    title: str,
+    fetch_date: int,
+    desc: str = "alpha beta gamma",
+    lang: str = "en",
 ) -> None:
     records = [
         {
@@ -40,6 +46,7 @@ def _write_part(
             "title": "Pod A",
             "rss": RSS.format(title=title, desc=desc),
             "fetch_date": fetch_date,
+            "language": lang,
         }
     ]
     pq.write_table(fetch._part_table(records), rss_dir / f"part-{seq:04d}.parquet")
@@ -56,12 +63,30 @@ def test_ingest_and_search_roundtrip(tmp_path) -> None:
     assert stats["chunks"] > 0
 
     tbl = lance_store.open_chunks(lance_dir)
-    hits = lance_store.search(tbl, FakeModel(), FakeReranker(), "query", k=5)
+    hits = lance_store.search(tbl, FakeModel(), FakeReranker(), "query", "en", k=5)
     assert len(hits) == 1
     assert hits[0].score == pytest.approx(1.0)
     assert hits[0].podcast == "Pod A"
     assert hits[0].episode == "Episode one"
     assert hits[0].pubdate > 0
+
+
+def test_search_filters_by_language(tmp_path) -> None:
+    """ADR-0001: lang restricts candidates to same-language chunks."""
+    rss_dir = tmp_path / "rss"
+    rss_dir.mkdir()
+    lance_dir = tmp_path / "lancedb"
+    _write_part(rss_dir, 0, "u1", "Episode one", 1000, lang="en")
+    _write_part(rss_dir, 1, "u2", "Folge eins", 1000, lang="de")
+    lance_store.ingest_parts(FakeModel(), rss_dir=rss_dir, path=lance_dir)
+
+    tbl = lance_store.open_chunks(lance_dir)
+    hits = lance_store.search(tbl, FakeModel(), FakeReranker(), "query", "de")
+    assert [h.episode for h in hits] == ["Folge eins"]
+    assert hits[0].language == "de"
+    hits = lance_store.search(tbl, FakeModel(), FakeReranker(), "query", "en")
+    assert [h.episode for h in hits] == ["Episode one"]
+    assert lance_store.search(tbl, FakeModel(), FakeReranker(), "query", "fr") == []
 
 
 def test_search_dedups_chunks_of_one_episode(tmp_path) -> None:
@@ -74,7 +99,7 @@ def test_search_dedups_chunks_of_one_episode(tmp_path) -> None:
     assert stats["chunks"] == 2
 
     hits = lance_store.search(
-        lance_store.open_chunks(lance_dir), FakeModel(), FakeReranker(), "query", k=5
+        lance_store.open_chunks(lance_dir), FakeModel(), FakeReranker(), "query", "en", k=5
     )
     assert [h.episode for h in hits] == ["Episode one"]
 
@@ -94,7 +119,7 @@ def test_ingest_idempotent_and_replace(tmp_path) -> None:
     stats = lance_store.ingest_parts(FakeModel(), rss_dir=rss_dir, path=lance_dir)
     assert stats["parts"] == 1
     tbl = lance_store.open_chunks(lance_dir)
-    hits = lance_store.search(tbl, FakeModel(), FakeReranker(), "query", k=5)
+    hits = lance_store.search(tbl, FakeModel(), FakeReranker(), "query", "en", k=5)
     assert [h.episode for h in hits] == ["Episode one v2"]
 
 
@@ -108,6 +133,6 @@ def test_rebuild_reingests_everything(tmp_path) -> None:
     stats = lance_store.ingest_parts(FakeModel(), rss_dir=rss_dir, path=lance_dir, rebuild=True)
     assert stats["parts"] == 1
     hits = lance_store.search(
-        lance_store.open_chunks(lance_dir), FakeModel(), FakeReranker(), "query"
+        lance_store.open_chunks(lance_dir), FakeModel(), FakeReranker(), "query", "en"
     )
     assert len(hits) == 1
