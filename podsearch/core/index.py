@@ -22,7 +22,7 @@ MAX_CHUNKS_PER_EPISODE = 3
 ENCODE_BATCH = 512
 # Hits repeat an episode for several reasons (chunks per episode, republished
 # feeds). Fetch extra candidates so dedup_hits can still return k episodes.
-SEARCH_OVERFETCH = 6
+SEARCH_OVERFETCH = 3
 MIN_RERANK_CANDIDATES = 30
 
 
@@ -31,10 +31,22 @@ def rerank_limit(k: int) -> int:
     return max(k * SEARCH_OVERFETCH, MIN_RERANK_CANDIDATES)
 
 
+def resolve_model(name: str) -> str:
+    """Local snapshot path if the model is cached (no Hub calls), else the repo id."""
+    from huggingface_hub import snapshot_download
+    from huggingface_hub.errors import LocalEntryNotFoundError
+
+    try:
+        return snapshot_download(name, local_files_only=True)
+    except LocalEntryNotFoundError:
+        return name
+
+
 def load_model() -> StaticModel:
+    """Load the static embedder, reusing the HF cache (model2vec forces a download by default)."""
     from model2vec import StaticModel
 
-    return StaticModel.from_pretrained(MODEL_NAME)
+    return StaticModel.from_pretrained(MODEL_NAME, force_download=False)
 
 
 def load_reranker() -> CrossEncoder:
@@ -42,7 +54,7 @@ def load_reranker() -> CrossEncoder:
     import torch
     from sentence_transformers import CrossEncoder
 
-    return CrossEncoder(RERANK_MODEL_NAME, activation_fn=torch.nn.Sigmoid())
+    return CrossEncoder(resolve_model(RERANK_MODEL_NAME), activation_fn=torch.nn.Sigmoid())
 
 
 @dataclass
