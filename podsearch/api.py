@@ -12,18 +12,24 @@ from podsearch.cli import common
 from podsearch.core import index
 
 
-def create_app(impl: str = "naive") -> FastAPI:
-    """Build the app for a search impl; store+model load eagerly at startup."""
+def create_app(impl: str = "naive", rerank: bool = True) -> FastAPI:
+    """Build the app for a search impl; store+model load eagerly at startup.
+
+    rerank=False skips loading the cross-encoder and returns stage-1 results.
+    """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         app.state.store = common.open_store(impl)
         app.state.model = index.load_model()
-        app.state.reranker = index.load_reranker()
+        app.state.reranker = index.load_reranker() if rerank else None
         stats = common.stats(impl, app.state.store)
-        app.state.info = {"impl": impl, **stats}
+        app.state.info = {"impl": impl, "rerank": rerank, **stats}
         eps = f"{stats['episodes']:,}" if stats["episodes"] is not None else "?"
-        print(f"podsearch backend: {impl} ({eps} episodes, {stats['chunks']:,} chunks)")
+        print(
+            f"podsearch backend: {impl} ({eps} episodes, {stats['chunks']:,} chunks, "
+            f"rerank={'on' if rerank else 'off'})"
+        )
         yield
 
     app = FastAPI(title="podsearch", lifespan=lifespan)

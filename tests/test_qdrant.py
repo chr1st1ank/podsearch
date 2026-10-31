@@ -66,6 +66,31 @@ def test_ingest_idempotent_and_replace(env) -> None:
     assert [h.episode for h in hits] == ["Episode one v2"]
 
 
+def test_episode_count_stored_at_ingest_and_stale_detected(env) -> None:
+    rss_dir, client = env
+    _write_part(rss_dir, 0, "u1", "Episode one", 1000)
+    _write_part(rss_dir, 1, "u2", "Episode two", 1000)
+    qdrant_store.ingest_parts(FakeModel(), rss_dir=rss_dir, client=client)
+    assert qdrant_store.episode_count(client) == 1  # helper reuses guid "g1" for all episodes
+
+    # re-run with nothing new keeps parts bookkeeping intact (stats point is not a part)
+    assert qdrant_store.ingest_parts(FakeModel(), rss_dir=rss_dir, client=client)["skipped"] == 2
+
+    client.delete(
+        qdrant_store.CHUNKS_COLLECTION,
+        qdrant_store.models.FilterSelector(
+            filter=qdrant_store.models.Filter(
+                must=qdrant_store.models.FieldCondition(
+                    key="feed_url", match=qdrant_store.models.MatchValue(value="u2")
+                )
+            )
+        ),
+    )
+    assert qdrant_store.episode_count(client) is None  # stale snapshot
+    qdrant_store.ingest_parts(FakeModel(), rss_dir=rss_dir, client=client)  # backfills
+    assert qdrant_store.episode_count(client) == 1  # recomputed for the remaining chunk
+
+
 def test_rebuild_reingests_everything(env) -> None:
     rss_dir, client = env
     _write_part(rss_dir, 0, "u1", "Episode one", 1000)

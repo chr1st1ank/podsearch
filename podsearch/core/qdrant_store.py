@@ -58,10 +58,41 @@ def _ensure_collections(client: QdrantClient, dim: int) -> None:
         client.create_payload_index(CHUNKS_COLLECTION, "language", models.PayloadSchemaType.KEYWORD)
 
 
-def episode_count(client: QdrantClient) -> int:
-    """Distinct guid count via facet on the guid payload index."""
+def _stats_id() -> str:
+    return str(uuid.uuid5(_NS, "__stats__"))
+
+
+def refresh_stats(client: QdrantClient) -> int:
+    """Count distinct guids (expensive facet) and store it next to the chunk count.
+
+    The facet enumerates every distinct guid, so this runs at ingest time only;
+    readers use episode_count() which just compares the stored snapshot.
+    """
     n = client.count(CHUNKS_COLLECTION).count
-    return len(client.facet(CHUNKS_COLLECTION, key="guid", limit=max(n, 1)).hits)
+    episodes = len(client.facet(CHUNKS_COLLECTION, key="guid", limit=max(n, 1)).hits)
+    client.upsert(
+        PARTS_COLLECTION,
+        [
+            models.PointStruct(
+                id=_stats_id(), vector={}, payload={"points_count": n, "episodes": episodes}
+            )
+        ],
+        wait=True,
+    )
+    return episodes
+
+
+def episode_count(client: QdrantClient) -> int | None:
+    """Stored distinct-episode count, or None if missing or stale (chunk count moved)."""
+    if not client.collection_exists(PARTS_COLLECTION):
+        return None
+    recs = client.retrieve(PARTS_COLLECTION, [_stats_id()], with_payload=True)
+    if not recs or recs[0].payload is None:
+        return None
+    p = recs[0].payload
+    if p["points_count"] != client.count(CHUNKS_COLLECTION).count:
+        return None
+    return int(p["episodes"])
 
 
 def _ensure_parts(client: QdrantClient) -> None:
@@ -76,7 +107,9 @@ def _done_parts(client: QdrantClient) -> set[str]:
         points, offset = client.scroll(
             PARTS_COLLECTION, limit=1_000, offset=offset, with_payload=["path"]
         )
-        done.update(p.payload["path"] for p in points if p.payload is not None)
+        done.update(
+            p.payload["path"] for p in points if p.payload is not None and "path" in p.payload
+        )
         if offset is None:
             return done
 
@@ -113,6 +146,8 @@ def ingest_parts(
     parts = [p for p in rss_store.list_parts(rss_dir) if p.name not in done][:max_parts]
     stats = {"parts": 0, "chunks": 0, "skipped": len(done), "stale": 0}
     if not parts:
+        if client.collection_exists(CHUNKS_COLLECTION) and episode_count(client) is None:
+            refresh_stats(client)
         return stats
 
     dim = len(model.encode(["dimension probe"])[0])
@@ -183,6 +218,7 @@ def ingest_parts(
         CHUNKS_COLLECTION,
         optimizers_config=models.OptimizersConfigDiff(indexing_threshold=INDEXING_THRESHOLD_KB),
     )
+    refresh_stats(client)
     return stats
 
 

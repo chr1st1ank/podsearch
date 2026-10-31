@@ -187,6 +187,17 @@ def test_rerank_reorders_candidates(tmp_path) -> None:
     idx.conn.close()
 
 
+def test_rerank_none_keeps_stage1_order() -> None:
+    def hit(ep: str, score: float) -> index.Hit:
+        return index.Hit("P", ep, score, "x" * 300, "l", 0, "u", ep, "en")
+
+    hits = [hit("a", 0.2), hit("b", 0.9), hit("c", 0.5)]
+    out = index.rerank(None, "q", hits, k=2)
+    assert [h.episode for h in out] == ["b", "c"]
+    assert [h.score for h in out] == [0.9, 0.5]
+    assert all(len(h.snippet) == 200 for h in out)
+
+
 def test_rerank_passage_formatting_and_snippet_truncate(tmp_path) -> None:
     """Passages get podcast+episode context; snippets end up <= 200 chars."""
     db = tmp_path / "corpus.db"

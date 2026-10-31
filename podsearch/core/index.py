@@ -212,9 +212,16 @@ def rerank(reranker, query: str, hits: list[Hit], k: int) -> list[Hit]:
 
     Each passage includes podcast + episode title + full chunk text so chunks 2+
     (which start mid-episode, without the title) still get episode context.
+
+    With reranker=None the stage-1 scores (cosine similarity) are kept as-is.
     """
     if not hits:
         return []
+    if reranker is None:
+        for h in hits:
+            h.snippet = h.snippet[:200]
+        hits.sort(key=lambda h: h.score, reverse=True)
+        return dedup_hits(hits, k)
     pairs = []
     for h in hits:
         text = h.snippet
