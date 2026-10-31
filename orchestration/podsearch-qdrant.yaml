@@ -18,7 +18,7 @@ params:
   - name: LANG
     default: "de,en"
     # default: "de,en"  # de + en (the CLI default)
-    description: Comma-separated feed languages (podsearch-fetch-rss --lang)
+    description: Comma-separated feed languages (podsearch-fetch-rss and podsearch-ingest --lang)
 
 # catalog + fetch_rss share data/podcastindex_feeds.db and data/rss/*.parquet
 # with the sqlite pipeline (fetch is idempotent); ingest bookkeeping lives in
@@ -32,5 +32,5 @@ steps:
     depends: catalog
 
   - id: ingest_qdrant
-    run: uv run podsearch-ingest --impl qdrant
+    run: uv run podsearch-ingest --impl qdrant --lang=${LANG}
     depends: fetch_rss

@@ -109,6 +109,7 @@ def ingest_parts(
     max_per_feed: int = 300,
     impl: parse.Parser = "rs",
     max_parts: int | None = None,
+    langs: tuple[str, ...] | None = None,
 ) -> dict[str, int]:
     """Parse not-yet-ingested parquet parts (at most max_parts) into the episodes table."""
     conn = open_corpus(db_path)
@@ -132,6 +133,8 @@ def ingest_parts(
             ).iter_rows():
                 if body is None or fetch_date < latest[url]:
                     stats["stale"] += body is not None
+                    continue
+                if langs is not None and parse.lang_code(language) not in langs:
                     continue
                 for ep in parse.parse_feed(body, url, podcast or "", max_per_feed, impl, language):
                     text = strip_html(f"{ep['title']}\n\n{ep['description']}")

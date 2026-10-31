@@ -148,7 +148,14 @@ def select_feeds(
         "episodes": "episodeCount DESC",
         "popularity": "popularityScore DESC, newestItemPubdate DESC",
     }[order]
-    lang_sql = " OR ".join("language LIKE ?" for _ in langs)
+    lang_sql = " OR ".join(
+        "(lower(language) = ? OR lower(language) GLOB ? OR lower(language) GLOB ?"
+        " OR lower(language) GLOB ? OR lower(language) GLOB ? OR lower(language) GLOB ?)"
+        for _ in langs
+    )
+    lang_params = [
+        p for lang in langs for p in (lang, *(f"{lang}{sep}*" for sep in ("-", "_", ",", ";", " ")))
+    ]
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
@@ -156,7 +163,7 @@ def select_feeds(
             f"SELECT * FROM podcasts WHERE episodeCount >= ?"
             f" AND newestItemPubdate >= ? AND ({lang_sql})"
             f" ORDER BY {order_sql}",
-            (min_episodes, updated_since, *(f"{lang}%" for lang in langs)),
+            (min_episodes, updated_since, *lang_params),
         )
         feeds: list[dict[str, Any]] = []
         seen: set[str] = set()

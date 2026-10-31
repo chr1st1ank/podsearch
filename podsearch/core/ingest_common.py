@@ -20,7 +20,15 @@ EPISODE_COLUMNS = {
 CHUNK_COLUMNS = ["feed_url", "guid", "podcast", "episode", "link", "pubdate", "text", "language"]
 
 
-def parse_feed(feed: dict[str, Any], max_episodes: int, impl: parse.Parser) -> list[dict[str, Any]]:
+def parse_feed(
+    feed: dict[str, Any],
+    max_episodes: int,
+    impl: parse.Parser,
+    langs: tuple[str, ...] | None = None,
+) -> list[dict[str, Any]]:
+    """Parse one feed; feeds whose normalized language is not in langs yield nothing."""
+    if langs is not None and parse.lang_code(feed.get("language")) not in langs:
+        return []
     return parse.parse_feed(
         feed["rss"],
         feed["url"],

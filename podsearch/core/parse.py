@@ -1,6 +1,7 @@
 """Parse stored RSS bodies into episode dicts. Used by the ingest stage."""
 
 import calendar
+import re
 from typing import Any, Literal
 
 import feedparser  # TODO: kept as slow baseline for the profiling demo
@@ -11,7 +12,8 @@ Parser = Literal["rs", "feedparser"]
 
 def lang_code(language: str | None) -> str:
     """Normalize a catalog language value to a primary subtag; 'und' if missing."""
-    return (language or "und").split("-")[0].strip().lower() or "und"
+    tags = re.sub(r"[-_,;\s]+", " ", (language or "").lower()).split()
+    return tags[0] if tags else "und"
 
 
 def parse_feed(

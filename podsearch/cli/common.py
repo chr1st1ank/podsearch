@@ -12,6 +12,11 @@ QUERIES_PATH = Path(__file__).resolve().parent.parent / "queries.txt"
 IMPLS = ["naive", "numpy", "lancedb", "qdrant"]
 
 
+def parse_langs(args: list[str] | None) -> tuple[str, ...]:
+    """Repeatable/comma-separated --lang values -> codes; 'en,de' when omitted."""
+    return tuple(lang for arg in (args or ["en", "de"]) for lang in arg.split(",") if lang)
+
+
 def fmt_hit(h: index.Hit) -> str:
     date = time.strftime("%Y-%m-%d", time.gmtime(h.pubdate)) if h.pubdate else "----------"
     return f"  {h.score:.4f}  {date}  {h.podcast} — {h.episode}"

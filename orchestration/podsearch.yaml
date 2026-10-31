@@ -18,7 +18,7 @@ params:
   - name: LANG
     default: "de"
     # default: "de,en"  # de + en (the CLI default)
-    description: Comma-separated feed languages (podsearch-fetch-rss --lang)
+    description: Comma-separated feed languages (podsearch-fetch-rss and podsearch-ingest --lang)
 
 steps:
   - id: catalog
@@ -29,7 +29,7 @@ steps:
     depends: catalog
 
   - id: ingest
-    run: uv run podsearch-ingest
+    run: uv run podsearch-ingest --lang=${LANG}
     depends: fetch_rss
 
   - id: index

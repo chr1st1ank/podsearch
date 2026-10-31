@@ -43,3 +43,11 @@ def test_select_feeds_limit_counts_unique_feeds(tmp_path) -> None:
     )
     feeds = catalog.select_feeds(db, langs=("en",), min_episodes=0, limit=2)
     assert [f["url"] for f in feeds] == ["u1", "u3"]
+
+
+def test_select_feeds_matches_language_code_not_prefix(tmp_path) -> None:
+    db = tmp_path / "catalog.db"
+    langs = ["en", "en-US", "EN_us", "en,es", "english", "eng, zho", "de", "fr"]
+    _catalog_db(db, [(f"u{i}", "F", 50, 1000 - i, lang, "") for i, lang in enumerate(langs)])
+    feeds = catalog.select_feeds(db, langs=("en",), min_episodes=0)
+    assert [f["url"] for f in feeds] == ["u0", "u1", "u2", "u3"]

@@ -4,6 +4,7 @@ import argparse
 import logging
 from pathlib import Path
 
+from podsearch.cli import common
 from podsearch.core import catalog
 from podsearch.core.fetch import PER_HOST, fetch_rss
 from podsearch.core.paths import CATALOG_DB, RSS_DIR
@@ -58,7 +59,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     feeds = catalog.select_feeds(
         args.db,
-        langs=tuple(lang for arg in (args.lang or ["en", "de"]) for lang in arg.split(",") if lang),
+        langs=common.parse_langs(args.lang),
         min_episodes=args.min_episodes,
         updated_since=args.updated_since,
         limit=args.feeds,

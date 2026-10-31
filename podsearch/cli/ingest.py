@@ -4,6 +4,7 @@ import argparse
 import time
 from pathlib import Path
 
+from podsearch.cli import common
 from podsearch.core import corpus, index, lance_store, qdrant_store
 from podsearch.core.paths import CORPUS_DB, LANCE_DIR, QDRANT_URL, RSS_DIR
 
@@ -47,12 +48,20 @@ def main() -> None:
         action="store_true",
         help="drop and recreate the lancedb/qdrant store, re-ingesting every part present",
     )
+    parser.add_argument(
+        "--lang",
+        action="append",
+        default=None,
+        help="only ingest feeds in these languages, repeatable or comma-separated; "
+        "'en,de' when omitted",
+    )
     args = parser.parse_args()
+    langs = common.parse_langs(args.lang)
     if args.rebuild and args.impl == "sqlite":
         parser.error("--rebuild only applies to --impl lancedb|qdrant")
     t0 = time.perf_counter()
     if args.impl in ("lancedb", "qdrant"):
-        common = dict(
+        store_args = dict(
             rss_dir=args.rss_dir,
             max_per_feed=args.max_per_feed,
             parser_impl=args.parser,
@@ -60,17 +69,21 @@ def main() -> None:
             max_parts=args.parts,
         )
         if args.impl == "lancedb":
-            stats = lance_store.ingest_parts(index.load_model(), path=args.lance_dir, **common)
+            stats = lance_store.ingest_parts(
+                index.load_model(), path=args.lance_dir, langs=langs, **store_args
+            )
         else:
             client = qdrant_store.connect(args.qdrant_url)
-            stats = qdrant_store.ingest_parts(index.load_model(), client=client, **common)
+            stats = qdrant_store.ingest_parts(
+                index.load_model(), client=client, langs=langs, **store_args
+            )
         print(
             f"ingested {stats['parts']} new parts ({stats['skipped']} already done), "
             f"{stats['chunks']:,} chunks ({time.perf_counter() - t0:.1f} s)"
         )
     else:
         stats = corpus.ingest_parts(
-            args.rss_dir, args.db, args.max_per_feed, args.parser, args.parts
+            args.rss_dir, args.db, args.max_per_feed, args.parser, args.parts, langs
         )
         print(
             f"ingested {stats['parts']} new parts ({stats['skipped']} already done), "

@@ -73,3 +73,15 @@ def test_rebuild_reingests_everything(env) -> None:
     stats = qdrant_store.ingest_parts(FakeModel(), rss_dir=rss_dir, client=client, rebuild=True)
     assert stats["parts"] == 1
     assert len(qdrant_store.search(client, FakeModel(), FakeReranker(), "query", "en")) == 1
+
+
+def test_ingest_langs_filter_skips_other_languages(env) -> None:
+    rss_dir, client = env
+    _write_part(rss_dir, 0, "u1", "Episode one", 1000, lang="en_US")
+    _write_part(rss_dir, 1, "u2", "Folge eins", 1000, lang="de")
+    _write_part(rss_dir, 2, "u3", "Episode three", 1000, lang="english")
+    qdrant_store.ingest_parts(FakeModel(), rss_dir=rss_dir, client=client, langs=("en", "de"))
+
+    hits = qdrant_store.search(client, FakeModel(), FakeReranker(), "query", "en", k=10)
+    assert [h.episode for h in hits] == ["Episode one"]
+    assert client.count(qdrant_store.CHUNKS_COLLECTION).count == 2

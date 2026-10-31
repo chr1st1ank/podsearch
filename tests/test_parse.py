@@ -47,5 +47,8 @@ def test_parse_feed_rs_matches_feedparser() -> None:
 def test_lang_code() -> None:
     assert parse.lang_code("de-AT") == "de"
     assert parse.lang_code(" EN ") == "en"
+    assert parse.lang_code("en_US") == "en"
+    assert parse.lang_code("de_de") == "de"
+    assert parse.lang_code("en,es") == "en"
     assert parse.lang_code("") == "und"
     assert parse.lang_code(None) == "und"

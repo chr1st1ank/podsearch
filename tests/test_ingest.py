@@ -55,3 +55,12 @@ def test_ingest_skips_stale_feed_version(tmp_path) -> None:
     _part(rss_dir, "part-0001.parquet", "https://f", "old notes", 100)
     corpus.ingest_parts(rss_dir, db)
     assert _episode_texts(db) == ["Ep new notes"]
+
+
+def test_ingest_langs_filter(tmp_path) -> None:
+    rss_dir = tmp_path / "rss"
+    rss_dir.mkdir()
+    db = tmp_path / "corpus.db"
+    _part(rss_dir, "part-0000.parquet", "https://f", "notes", 100)  # no language -> und
+    corpus.ingest_parts(rss_dir, db, langs=("en", "de"))
+    assert _episode_texts(db) == []
