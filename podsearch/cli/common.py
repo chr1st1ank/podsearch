@@ -1,6 +1,5 @@
-"""Shared helpers for the query/bench entrypoints."""
+"""Shared helpers for the bench/serve entrypoints."""
 
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -15,11 +14,6 @@ IMPLS = ["naive", "numpy", "lancedb", "qdrant"]
 def parse_langs(args: list[str] | None) -> tuple[str, ...]:
     """Repeatable/comma-separated --lang values -> codes; 'en,de' when omitted."""
     return tuple(lang for arg in (args or ["en", "de"]) for lang in arg.split(",") if lang)
-
-
-def fmt_hit(h: index.Hit) -> str:
-    date = time.strftime("%Y-%m-%d", time.gmtime(h.pubdate)) if h.pubdate else "----------"
-    return f"  {h.score:.4f}  {date}  {h.podcast} — {h.episode}"
 
 
 def open_store(impl: str, lance_dir: Path | None = None, qdrant_url: str | None = None):

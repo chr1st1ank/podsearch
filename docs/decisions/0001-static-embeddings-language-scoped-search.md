@@ -45,7 +45,7 @@ dimension**:
 - One index per impl (column + filter, not per-language stores). All four
   search impls (`naive`, `numpy`, `lancedb`, `qdrant`) take a required `lang`
   and filter candidates before reranking.
-- `podsearch-query`/`podsearch-bench`/`podsearch-load` require `--lang`;
+- `podsearch-bench`/`podsearch-load` require `--lang`;
   `/search` and `/search-async` require a `lang` query param; the web UI
   offers a language dropdown populated from `/api/stats`.
 
@@ -105,7 +105,7 @@ multilingual reach later without touching embeddings.
 ## Verification
 
 - [ ] `task check` green (ruff, ty, pytest)
-- [ ] `podsearch-query --lang de "Pferde"` returns only German hits
+- [ ] searching "Pferde" with `lang=de` returns only German hits
 - [ ] UI language dropdown filters results
 - [ ] Indexing throughput is back to ~4k chunks/s order of magnitude
 - [ ] `episodes.language`/`chunks.language` populated after re-ingest

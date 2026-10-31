@@ -44,7 +44,7 @@ flowchart TD
     C3 -->|"newest version per feed ·<br/>upsert episodes"| CORP[("data/corpus.db<br/>episodes + chunks")]
     CORP --> C4["podsearch-index"]
     C4 -->|"chunk + encode"| VEC[("data/vectors.f32")]
-    VEC -->|"cosine: naive vs numpy"| S5["podsearch-query · -bench ·<br/>-serve · -load"]
+    VEC -->|"cosine: naive vs numpy"| S5["podsearch-bench · -serve ·<br/>-load"]
     CORP -->|"hydrate top-k"| S5
 ```
 
@@ -129,12 +129,9 @@ dep behind `python_version < "3.15"` — no cp315 wheels exist.)
 
 ## Search
 
-```bash
-uv run podsearch-query "startup fundraising advice" --lang en
-uv run podsearch-query "startup fundraising advice" --lang en --impl numpy
-uv run podsearch-query "startup fundraising advice" --lang en --impl lancedb
-uv run podsearch-query "startup fundraising advice" --lang en --impl qdrant
+Interactive search: `task serve`, then open http://localhost:8000.
 
+```bash
 # benchmark: queries from podsearch/queries.txt
 uv run podsearch-bench --lang en --queries 2                # naive: slow on purpose
 uv run podsearch-bench --lang en --impl numpy --queries 20 --repeat 100
@@ -182,9 +179,6 @@ uv run python -m profiling.sampling run --mode=gil  -m podsearch.cli.fetch_rss -
 # index: model2vec encode — native frames under the Python stack
 uv run python -m profiling.sampling run --native --flamegraph -o results/index-native.html -m podsearch.cli.indexing --vectors data/vectors-prof.f32
 uv run python -m profiling.sampling run --native --heatmap -o results/index-heat -m podsearch.cli.indexing --vectors data/vectors-prof.f32
-
-# query: a single naive search — "why is this slow?"
-uv run python -m profiling.sampling run --flamegraph -o results/query.html -m podsearch.cli.query "startup fundraising advice" --lang en
 
 # record binary, replay to another format
 uv run python -m profiling.sampling run --binary -o results/ingest.bin -m podsearch.cli.ingest --db data/corpus-prof.db
