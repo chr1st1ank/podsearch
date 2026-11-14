@@ -11,3 +11,8 @@ htmlcov/
 .pytest_cache/
 .ruff_cache/
 __marimo__/
+.vscode/
+# Profiling outputs:
+flamegraph_*.html
+heatmap_*/
+binary_*.bin
