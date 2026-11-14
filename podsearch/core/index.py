@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
-from sklearn.metrics import pairwise
 
 from podsearch.core import corpus
 from podsearch.core.paths import CORPUS_DB, VECTORS_PATH
@@ -62,7 +61,6 @@ def load_reranker() -> CrossEncoder:
 class Index:
     vectors: np.ndarray  # memmap'd (n, dim) float32
     conn: sqlite3.Connection
-    _norm: np.ndarray | None = None
     _lang_rows: dict[str, np.ndarray] = field(default_factory=dict)
 
 
@@ -122,7 +120,7 @@ def build_index(
         nonlocal n, dim
         if not texts:
             return
-        vecs = np.asarray(model.encode(texts), dtype=np.float32)
+        vecs = _encode_unit(model, texts)
         dim = vecs.shape[1]
         f.write(vecs.tobytes())
         conn.executemany(
@@ -158,14 +156,20 @@ def load(vectors_path: Path = VECTORS_PATH, db_path: Path = CORPUS_DB) -> Index:
     return Index(vectors, conn)
 
 
-def _cosine(query: list[float], vec) -> float:
-    return float(
-        pairwise.cosine_similarity(np.atleast_2d(vec), np.array([query]), dense_output=True)[0][0]
-    )
+def _encode_unit(model, texts: list[str]) -> np.ndarray:
+    """Encode texts as L2-normalized float32 rows so cosine similarity = dot product."""
+    vecs = np.asarray(model.encode(texts), dtype=np.float32)
+    norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+    return np.divide(vecs, norms, out=np.zeros_like(vecs), where=norms > 0)
+
+
+def _cosine(query: np.ndarray, vec: np.ndarray) -> float:
+    """Dot product; index rows and queries are L2-normalized by _encode_unit."""
+    return float(query @ vec)
 
 
 def _lang_rows(index: Index, lang: str) -> np.ndarray:
-    """Vector rows belonging to one language; cached per language like _norm."""
+    """Vector rows belonging to one language; cached per language."""
     rows = index._lang_rows.get(lang)
     if rows is None:
         rows = np.asarray(
@@ -237,7 +241,7 @@ def search(index: Index, model, reranker, query: str, lang: str, k: int = 5) -> 
     rows = _lang_rows(index, lang)
     if not len(rows):
         return []
-    q = model.encode([query])[0].tolist()
+    q = _encode_unit(model, [query])[0]
     scored = [(_cosine(q, index.vectors[i]), int(i)) for i in rows]
     scored.sort(reverse=True)
     candidates = _hydrate(index, scored[: rerank_limit(k)])
@@ -249,17 +253,8 @@ def search_numpy(index: Index, model, reranker, query: str, lang: str, k: int = 
     rows = _lang_rows(index, lang)
     if not len(rows):
         return []
-    matrix = index._norm
-    if matrix is None:
-        m = index.vectors
-        norms = np.linalg.norm(m, axis=1, keepdims=True)
-        matrix = np.divide(m, norms, out=np.zeros(m.shape, dtype=np.float32), where=norms > 0)
-        index._norm = matrix
-    q = model.encode([query])[0].astype(np.float32)
-    nq = np.linalg.norm(q)
-    if nq:
-        q /= nq
-    scores = matrix[rows] @ q
+    q = _encode_unit(model, [query])[0]
+    scores = index.vectors[rows] @ q
     limit = min(rerank_limit(k), len(scores))
     top = np.argpartition(scores, -limit)[-limit:]
     top = top[np.argsort(scores[top])[::-1]]

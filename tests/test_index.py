@@ -36,13 +36,25 @@ class KeywordReranker:
 
 
 def test_cosine_basic() -> None:
-    assert index._cosine([1.0, 0.0], [1.0, 0.0]) == pytest.approx(1.0)
-    assert index._cosine([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
-    assert index._cosine([1.0, 1.0], [1.0, 0.0]) == pytest.approx(2**-0.5)
+    """_cosine is a dot product; callers pass L2-normalized vectors."""
+    assert index._cosine(np.array([1.0, 0.0]), np.array([1.0, 0.0])) == pytest.approx(1.0)
+    assert index._cosine(np.array([1.0, 0.0]), np.array([0.0, 1.0])) == pytest.approx(0.0)
+    assert index._cosine(np.array([2**-0.5, 2**-0.5]), np.array([1.0, 0.0])) == pytest.approx(
+        2**-0.5
+    )
 
 
 def test_cosine_zero_vector() -> None:
-    assert index._cosine([0.0, 0.0], [1.0, 0.0]) == 0.0
+    assert index._cosine(np.zeros(2), np.array([1.0, 0.0])) == 0.0
+
+
+def test_encode_unit_normalizes_rows() -> None:
+    """Non-unit embeddings are L2-normalized; zero rows stay zero."""
+    vecs = index._encode_unit(FakeModel([3.0, 4.0]), ["a", "b"])
+    assert np.linalg.norm(vecs, axis=1) == pytest.approx([1.0, 1.0])
+    assert vecs[0] == pytest.approx([0.6, 0.8])
+    zeros = index._encode_unit(ZeroVecModel(), ["zword"])
+    assert zeros.tolist() == [[0.0, 0.0]]
 
 
 def _tiny_corpus(db_path):
