@@ -25,7 +25,6 @@ podsearch-fetch-rss = "podsearch.cli.fetch_rss:main"
 podsearch-ingest = "podsearch.cli.ingest:main"
 podsearch-index = "podsearch.cli.indexing:main"
 podsearch-serve = "podsearch.cli.serve:main"
-podsearch-load = "podsearch.cli.load:main"
 podsearch-bench = "podsearch.cli.bench:main"
 
 [dependency-groups]

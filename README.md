@@ -141,9 +141,9 @@ uv run podsearch-bench --lang en --impl qdrant --queries 20
 # web service (attach target)
 uv run podsearch-serve                                  # serves :8000
 
-# load generator (run in a second terminal)
-uv run podsearch-load --lang en --duration 30 --concurrency 4
-uv run podsearch-load --lang en --url http://127.0.0.1:8000/search-async --duration 30
+# load generator (vegeta, targets in podsearch/targets.txt; run in a second terminal)
+task load
+task load WORKERS=2 RATE=10 DURATION=60s
 ```
 
 The `-m` form also works (`uv run python -m podsearch.cli.bench`,
@@ -231,7 +231,7 @@ task pipeline-lancedb  # run the lancedb pipeline once via Dagu
 task dagu       # Dagu web UI on :8081
 task bench      # = uv run podsearch-bench
 task serve      # = uv run podsearch-serve
-task load       # = uv run podsearch-load
+task load       # = vegeta attack podsearch/targets.txt | vegeta report
 ```
 
 ## Files
@@ -248,6 +248,7 @@ task load       # = uv run podsearch-load
 - `podsearch/core/ingest_common.py` — chunking/embedding helpers shared by both fused stores
 - `podsearch/api.py` — FastAPI `/search`, `/search-async` (blocks the event loop), `/health`
 - `podsearch/cli/` — one entrypoint module per `podsearch-*` console script:
-  `catalog`, `fetch_rss`, `ingest`, `indexing` (stages 1-4), `serve`, `load`, `query`, `bench`
-- `podsearch/queries.txt` — 20 queries used by `bench` and `load.py`
+  `catalog`, `fetch_rss`, `ingest`, `indexing` (stages 1-4), `serve`, `query`, `bench`
+- `podsearch/queries.txt` — 20 queries used by `bench`
+- `podsearch/targets.txt` — vegeta targets file used by `task load` (German podcasts)
 - `tests/` — unit tests for corpus, fetch, and index helpers

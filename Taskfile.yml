@@ -96,13 +96,22 @@ tasks:
 
   serve:
     desc: Run the FastAPI service on :8000 (attach target)
+    vars:
+      THREADS: "4"
+    env:
+      OMP_NUM_THREADS: "{{.THREADS}}"
+      MKL_NUM_THREADS: "{{.THREADS}}"
     cmds:
       - uv run podsearch-serve {{.CLI_ARGS}}
 
   load:
     desc: Generate load against the service
+    vars:
+      TARGETS: podsearch/targets.txt
+      RATE: 1/5s
+      WORKERS: "1"
     cmds:
-      - uv run podsearch-load --lang en {{.CLI_ARGS}}
+      - vegeta attack -targets={{.TARGETS}} -rate={{.RATE}} -workers={{.WORKERS}} -timeout=30s {{.CLI_ARGS}} | vegeta report
 
   update-dependencies:
     desc: Upgrade locked dependencies and hook revisions (7-day cooldown)
