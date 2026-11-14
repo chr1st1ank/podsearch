@@ -228,7 +228,7 @@ def rerank(reranker, query: str, hits: list[Hit], k: int) -> list[Hit]:
     if not hits:
         return []
     if reranker is not None:
-        pairs = [[query, f"{h.episode}\n\n{h.snippet}"] for h in hits]
+        pairs = [[query, f"{h.episode[:50]}\n\n{h.snippet[-200:]}"] for h in hits]
         scores = reranker.predict(pairs)
         for h, s in zip(hits, scores, strict=True):
             h.score = float(s)
