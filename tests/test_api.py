@@ -7,6 +7,7 @@ are never touched - only routes that don't need them are covered here.
 from fastapi.testclient import TestClient
 
 from podsearch import api
+from podsearch.core import index
 
 
 def test_index_page_served() -> None:
@@ -27,6 +28,17 @@ def test_no_rerank_skips_reranker_load(monkeypatch) -> None:
     monkeypatch.setattr(api.common, "stats", lambda impl, store: {"episodes": 1, "chunks": 2})
     with TestClient(api.create_app("naive", rerank=False)) as client:
         assert client.get("/api/stats").json()["rerank"] is False
+
+
+def test_search_caps_snippet_for_display(monkeypatch) -> None:
+    """Hit.snippet carries the full chunk; the API response caps it at 200 chars."""
+    hits = [index.Hit("P", "E", 0.9, "x" * 300, "l", 0, "u", "g", "en")]
+    monkeypatch.setattr(api.common, "search_fn", lambda impl: lambda *a: hits)
+    app = api.create_app("naive")
+    app.state.store = app.state.model = app.state.reranker = None
+    r = TestClient(app).get("/search", params={"q": "q", "lang": "en"})
+    assert r.status_code == 200
+    assert r.json()[0]["snippet"] == "x" * 200
 
 
 def test_stats_endpoint() -> None:

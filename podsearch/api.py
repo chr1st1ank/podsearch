@@ -58,7 +58,7 @@ def create_app(impl: str = "naive", rerank: bool = True) -> FastAPI:
 
     @app.get("/search")
     def search(request: Request, q: str, lang: str, k: int = 5) -> list[index.Hit]:
-        return search_fn(
+        hits = search_fn(
             request.app.state.store,
             request.app.state.model,
             request.app.state.reranker,
@@ -66,10 +66,14 @@ def create_app(impl: str = "naive", rerank: bool = True) -> FastAPI:
             lang,
             k,
         )
+        for h in hits:
+            h.snippet = h.snippet[:200]  # display length; Hit.snippet holds the full chunk
+        return hits
 
     @app.get("/search-async")
     async def search_async(request: Request, q: str, lang: str, k: int = 5) -> list[index.Hit]:
-        return search_fn(
+        # TODO: implement async search
+        hits = search_fn(
             request.app.state.store,
             request.app.state.model,
             request.app.state.reranker,
@@ -77,5 +81,8 @@ def create_app(impl: str = "naive", rerank: bool = True) -> FastAPI:
             lang,
             k,
         )
+        for h in hits:
+            h.snippet = h.snippet[:200]  # display length; Hit.snippet holds the full chunk
+        return hits
 
     return app

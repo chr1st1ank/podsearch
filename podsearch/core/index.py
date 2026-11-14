@@ -207,7 +207,7 @@ def _hydrate(index: Index, scored: list[tuple[float, int]]) -> list[Hit]:
             podcast=rows[i][2],
             episode=rows[i][3],
             score=float(s),
-            snippet=rows[i][1],  # full chunk text; rerank() truncates to [:200]
+            snippet=rows[i][1],
             link=rows[i][4],
             pubdate=rows[i][5],
             feed_url=rows[i][6],
@@ -222,29 +222,18 @@ def _hydrate(index: Index, scored: list[tuple[float, int]]) -> list[Hit]:
 def rerank(reranker, query: str, hits: list[Hit], k: int) -> list[Hit]:
     """Score stage-1 candidates with the cross-encoder, dedupe, and keep top k.
 
-    Each passage includes podcast + episode title + full chunk text so chunks 2+
-    (which start mid-episode, without the title) still get episode context.
+    Pairs include the episode title so chunks 2+ (which start mid-episode,
+    without the title) still get episode context.
 
     With reranker=None the stage-1 scores (cosine similarity) are kept as-is.
     """
     if not hits:
         return []
-    if reranker is None:
-        for h in hits:
-            h.snippet = h.snippet[:200]
-        hits.sort(key=lambda h: h.score, reverse=True)
-        return dedup_hits(hits, k)
-    pairs = []
-    for h in hits:
-        text = h.snippet
-        # chunk 1 of an episode repeats the title; don't send it twice
-        if text == h.episode or text.startswith(h.episode + " "):
-            text = text[len(h.episode) :].lstrip()
-        pairs.append([query, f"{h.podcast} — {h.episode}\n\n{text}"])
-    scores = reranker.predict(pairs)
-    for h, s in zip(hits, scores, strict=True):
-        h.score = float(s)
-        h.snippet = h.snippet[:200]
+    if reranker is not None:
+        pairs = [[query, f"{h.episode}\n\n{h.snippet}"] for h in hits]
+        scores = reranker.predict(pairs)
+        for h, s in zip(hits, scores, strict=True):
+            h.score = float(s)
     hits.sort(key=lambda h: h.score, reverse=True)
     return dedup_hits(hits, k)
 

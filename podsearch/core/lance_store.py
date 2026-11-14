@@ -182,8 +182,6 @@ def ingest_parts(
 def search(tbl: Table, model, reranker, q: str, lang: str, k: int = 5) -> list[Hit]:
     """Vector search scoped to one language; no hydration step needed."""
     q_vec = np.asarray(model.encode([q])[0], dtype=np.float32)
-    # stubs type search() as LanceQueryBuilder; a vector query yields the
-    # vector builder that has .metric()
     builder = cast("LanceVectorQueryBuilder", tbl.search(q_vec))
     rows = (
         builder.metric("cosine")
@@ -196,7 +194,7 @@ def search(tbl: Table, model, reranker, q: str, lang: str, k: int = 5) -> list[H
             podcast=r["podcast"],
             episode=r["episode"],
             score=0.0 if math.isnan(r["_distance"]) else 1.0 - r["_distance"],
-            snippet=r["text"],  # full chunk text; rerank() truncates to [:200]
+            snippet=r["text"],
             link=r["link"],
             pubdate=r["pubdate"],
             feed_url=r["feed_url"],

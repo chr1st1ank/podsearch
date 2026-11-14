@@ -195,11 +195,10 @@ def test_rerank_none_keeps_stage1_order() -> None:
     out = index.rerank(None, "q", hits, k=2)
     assert [h.episode for h in out] == ["b", "c"]
     assert [h.score for h in out] == [0.9, 0.5]
-    assert all(len(h.snippet) == 200 for h in out)
 
 
-def test_rerank_passage_formatting_and_snippet_truncate(tmp_path) -> None:
-    """Passages get podcast+episode context; snippets end up <= 200 chars."""
+def test_rerank_passage_formatting(tmp_path) -> None:
+    """Passages get episode context."""
     db = tmp_path / "corpus.db"
     vectors = tmp_path / "vectors.f32"
     conn = corpus.open_corpus(db)
@@ -216,13 +215,13 @@ def test_rerank_passage_formatting_and_snippet_truncate(tmp_path) -> None:
     idx = index.load(vectors, db)
     reranker = KeywordReranker("word")
     hits = index.search_numpy(idx, FakeModel([1.0, 0.0]), reranker, "q", "en", k=5)
-    assert hits and all(len(h.snippet) <= 200 for h in hits)
+    assert hits
 
-    # every candidate passage is "<podcast> — <episode>\n\n<chunk text>"
+    # every candidate passage is "<episode>\n\n<chunk text>"; chunk 1 repeats
+    # the title, which the cross-encoder tolerates
     first = reranker.last_pairs[0][1]
-    assert first.startswith("Pod A — Episode one\n\n")
-    # chunk 1's leading title is not duplicated in the passage
-    assert "Episode one\n\nEpisode one" not in first
+    assert first.startswith("Episode one\n\n")
+    assert "Pod A" not in first
     idx.conn.close()
 
 
