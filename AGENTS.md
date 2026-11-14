@@ -17,7 +17,7 @@ CLI suite sit on top. Python 3.15, uv/hatchling, flat layout (`podsearch/` at ro
 - `podsearch/api.py` — FastAPI app (`/search`, `/search-async`, `/health`)
 - `podsearch/static/` — minimal web UI served by the API
 - `podsearch/queries.txt` — 20 queries used by `bench`
-- `podsearch/targets.txt` — vegeta targets used by `task load`
+- `podsearch/targets.txt` — oha URL list used by `task load`
 - `tests/` — pytest suite; `test_retrieval.py` guards cross-language retrieval quality
 - `notebooks/` — marimo data-sampler notebook
 - `orchestration/` — Dagu DAGs wrapping the pipeline stages

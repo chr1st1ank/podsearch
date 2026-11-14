@@ -45,7 +45,7 @@ dimension**:
 - One index per impl (column + filter, not per-language stores). All four
   search impls (`naive`, `numpy`, `lancedb`, `qdrant`) take a required `lang`
   and filter candidates before reranking.
-- `podsearch-bench` requires `--lang`, as do the vegeta load targets in
+- `podsearch-bench` requires `--lang`, as do the load targets in
   `task load`; `/search` and `/search-async` require a `lang` query param;
   the web UI offers a language dropdown populated from `/api/stats`.
 
@@ -96,7 +96,7 @@ multilingual reach later without touching embeddings.
 - `podsearch/core/qdrant_store.py`: KEYWORD payload index on `language`;
   `FieldCondition` filter in `search`.
 - `podsearch/cli/{common,query,bench}.py`, `podsearch/api.py`,
-  `podsearch/static/index.html`, `task load` vegeta targets: required `lang`
+  `podsearch/static/index.html`, `task load` targets: required `lang`
   end-to-end; `stats` exposes `languages` for the UI dropdown.
 - `pyproject.toml`: re-add `model2vec` (`uv add model2vec`).
 - Tests: `test_retrieval.py` rewritten to same-language quality sanity;

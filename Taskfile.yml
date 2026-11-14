@@ -106,12 +106,8 @@ tasks:
 
   load:
     desc: Generate load against the service
-    vars:
-      TARGETS: podsearch/targets.txt
-      RATE: 1/5s
-      WORKERS: "1"
     cmds:
-      - vegeta attack -targets={{.TARGETS}} -rate={{.RATE}} -workers={{.WORKERS}} -timeout=30s {{.CLI_ARGS}} | vegeta report
+      - oha -c {{.CONNECTIONS | default "1"}} -p 1 --urls-from-file {{.TARGETS | default "podsearch/targets.txt"}} {{.CLI_ARGS}}
 
   update-dependencies:
     desc: Upgrade locked dependencies and hook revisions (7-day cooldown)

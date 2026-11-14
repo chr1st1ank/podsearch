@@ -141,9 +141,9 @@ uv run podsearch-bench --lang en --impl qdrant --queries 20
 # web service (attach target)
 uv run podsearch-serve                                  # serves :8000
 
-# load generator (vegeta, targets in podsearch/targets.txt; run in a second terminal)
+# load generator (oha, targets in podsearch/targets.txt; run in a second terminal)
 task load
-task load WORKERS=2 RATE=10 DURATION=60s
+task load CONNECTIONS=2 -- -z 60s
 ```
 
 The `-m` form also works (`uv run python -m podsearch.cli.bench`,
@@ -183,6 +183,16 @@ uv run python -m profiling.sampling run --native --heatmap -o results/index-heat
 # record binary, replay to another format
 uv run python -m profiling.sampling run --binary -o results/ingest.bin -m podsearch.cli.ingest --db data/corpus-prof.db
 uv run python -m profiling.sampling replay --flamegraph -o results/ingest-replay.html results/ingest.bin
+```
+
+Profiling the search:
+
+```bash
+uv run python -m profiling.sampling run --binary -o local/search.bin -m podsearch.cli.bench --lang de --impl qdrant --queries 5
+uv run python -m profiling.sampling replay --flamegraph -o local/search-replay.html local/search.bin
+firefox local/search-replay.html
+uv run python -m profiling.sampling replay --heatmap -o local/search-heatmap.html local/search.bin
+firefox local/search-heatmap/index.html
 ```
 
 ## Attach to the running server
@@ -231,7 +241,7 @@ task pipeline-lancedb  # run the lancedb pipeline once via Dagu
 task dagu       # Dagu web UI on :8081
 task bench      # = uv run podsearch-bench
 task serve      # = uv run podsearch-serve
-task load       # = vegeta attack podsearch/targets.txt | vegeta report
+task load       # = oha -c 1 -p 1 -t 30s --urls-from-file podsearch/targets.txt
 ```
 
 ## Files
@@ -250,5 +260,5 @@ task load       # = vegeta attack podsearch/targets.txt | vegeta report
 - `podsearch/cli/` — one entrypoint module per `podsearch-*` console script:
   `catalog`, `fetch_rss`, `ingest`, `indexing` (stages 1-4), `serve`, `query`, `bench`
 - `podsearch/queries.txt` — 20 queries used by `bench`
-- `podsearch/targets.txt` — vegeta targets file used by `task load` (German podcasts)
+- `podsearch/targets.txt` — oha URL list used by `task load` (German podcasts)
 - `tests/` — unit tests for corpus, fetch, and index helpers
