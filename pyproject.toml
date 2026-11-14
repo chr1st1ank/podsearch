@@ -17,6 +17,7 @@ dependencies = [
     "sentence-transformers>=4.0",
     "torch>=2.4; sys_platform == 'linux'",
     "model2vec>=0.10.0",
+    "scikit-learn>=1.9.1",
 ]
 
 [project.scripts]

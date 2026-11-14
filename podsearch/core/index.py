@@ -1,16 +1,17 @@
 """Embedding index: memmap'd float32 vectors + cosine similarity search."""
 
-import math
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import numpy as np
+from sklearn.metrics import pairwise
+
 from podsearch.core import corpus
 from podsearch.core.paths import CORPUS_DB, VECTORS_PATH
 
 if TYPE_CHECKING:
-    import numpy as np
     from model2vec import StaticModel
     from sentence_transformers import CrossEncoder
 
@@ -110,8 +111,6 @@ def build_index(
     batch: int = ENCODE_BATCH,
 ) -> int:
     """Stream episodes -> chunks -> embeddings; returns the vector count."""
-    import numpy as np
-
     vectors_path.parent.mkdir(parents=True, exist_ok=True)
     texts: list[str] = []
     langs: list[str] = []
@@ -152,8 +151,6 @@ def build_index(
 
 
 def load(vectors_path: Path = VECTORS_PATH, db_path: Path = CORPUS_DB) -> Index:
-    import numpy as np
-
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, check_same_thread=False)
     meta = dict(conn.execute("SELECT key, value FROM meta"))
     dim, n = int(meta["dim"]), int(meta["n"])
@@ -162,16 +159,13 @@ def load(vectors_path: Path = VECTORS_PATH, db_path: Path = CORPUS_DB) -> Index:
 
 
 def _cosine(query: list[float], vec) -> float:
-    dot = sum(q * v for q, v in zip(query, vec, strict=False))
-    nq = math.sqrt(sum(q * q for q in query))
-    nv = math.sqrt(sum(v * v for v in vec))
-    return float(dot / (nq * nv)) if nq and nv else 0.0
+    return float(
+        pairwise.cosine_similarity(np.atleast_2d(vec), np.array([query]), dense_output=True)[0][0]
+    )
 
 
 def _lang_rows(index: Index, lang: str) -> np.ndarray:
     """Vector rows belonging to one language; cached per language like _norm."""
-    import numpy as np
-
     rows = index._lang_rows.get(lang)
     if rows is None:
         rows = np.asarray(
@@ -252,8 +246,6 @@ def search(index: Index, model, reranker, query: str, lang: str, k: int = 5) -> 
 
 def search_numpy(index: Index, model, reranker, query: str, lang: str, k: int = 5) -> list[Hit]:
     """Vectorized version of search(): one matrix product over the language shard."""
-    import numpy as np
-
     rows = _lang_rows(index, lang)
     if not len(rows):
         return []
