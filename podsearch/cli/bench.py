@@ -27,11 +27,17 @@ def main() -> None:
         "--lance-dir", type=Path, default=None, help="lancedb store (--impl lancedb)"
     )
     parser.add_argument("--qdrant-url", default=None, help="qdrant server URL (--impl qdrant)")
+    parser.add_argument(
+        "--rerank",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="rerank candidates with the cross-encoder",
+    )
     args = parser.parse_args()
 
     store = common.open_store(args.impl, args.lance_dir, args.qdrant_url)
     model = index.load_model()
-    reranker = index.load_reranker()
+    reranker = index.load_reranker() if args.rerank else None
     queries = common.QUERIES_PATH.read_text().splitlines()[: args.queries]
     search = common.search_fn(args.impl)
     t0 = time.perf_counter()
