@@ -1,0 +1,25 @@
+name: podsearch-qdrant-index-only
+description: Qdrant ingest+index based on existing data
+type: graph
+
+# dagu resolves a relative working_dir against the DAG file's dir, so `..`
+# is the repo root (env vars are NOT expanded here - steps get a scrubbed env)
+working_dir: ..
+
+defaults:
+  retry_policy:
+    limit: 1
+    interval_sec: 30
+
+params:
+  - name: LANG
+    default: "de"
+    # default: "de,en"  # de + en (the CLI default)
+    description: Comma-separated feed languages (podsearch-fetch-rss and podsearch-ingest --lang)
+
+# catalog + fetch_rss share data/podcastindex_feeds.db and data/rss/*.parquet
+# with the sqlite pipeline (fetch is idempotent); ingest bookkeeping lives in
+# the qdrant store itself, so the pipelines stay independent.
+steps:
+  - id: ingest_qdrant
+    run: uv run podsearch-ingest --impl qdrant --rebuild --lang=${LANG}
