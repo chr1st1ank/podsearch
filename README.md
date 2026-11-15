@@ -1,37 +1,68 @@
 # podsearch
 
-Semantic search over podcast episodes. Four search implementations:
+Semantic search over podcast episodes. Reference for developers who run the pipeline, serve search, or benchmark the four `--impl` backends.
 
-- `naive`: cosine similarity in a pure-Python loop (`index.search`) — the hot spot
-- `numpy`: the same search as a single matrix product (`index.search_numpy`) — ~100x+ faster
-- `lancedb`: embedded vector DB (`lance_store.search`) — vectors + metadata in one
-  store, no hydration; the "production" impl, outside the profiling story
-- `qdrant`: Qdrant server in Docker (`qdrant_store.search`) — same fused layout as lancedb,
-  vectors + payload in one collection, server-side HNSW
+**Jump to:** [Quick start](#quick-start) · [Pick a backend](#pick-a-backend) · [Command cheat sheet](#command-cheat-sheet) · [Pipeline](#pipeline) · [Search & serve](#search--serve) · [Profiling](#profiling) · [Orchestration](#orchestration-dagu) · [Storage](#storage-layout) · [Dev tasks](#development) · [Code map](#code-map)
 
-Model: `minishlab/potion-multilingual-128M` via model2vec (256 dims, static
-subword embeddings — fast encode, ~4k chunks/s). Corpus: podcast episodes selected from
-the Podcast Index catalog and fetched via RSS. Index: `data/vectors.f32` (raw float32 matrix,
-memory-mapped) + `data/corpus.db` (SQLite: episodes, chunks, ingest bookkeeping).
+---
 
-Search is **language-scoped** ([ADR-0001](docs/decisions/0001-static-embeddings-language-scoped-search.md)):
-every query runs within one feed-declared language — `--lang`/`lang` is required
-on all entry points and only same-language chunks are scored. The Podcast Index
-catalog's feed `language` propagates through ingest into every chunk row.
+## Quick start
 
-Every search is two-stage retrieve + rerank: the vector search overfetches
-`max(6k, 30)` candidate chunks, then a cross-encoder
-(`cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` via sentence-transformers; ~470 MB HF
-download on first query, cached afterwards) scores `query × (podcast + episode
-title + chunk text)` with sigmoid-normalized scores, and the hits are deduped
-to k episodes. `torch` is pinned to PyTorch's official CPU wheel index
-(`[[tool.uv.index]] pytorch-cpu`) because PyPI has no `cp315` Linux wheels yet.
+Production path (`lancedb`, embedded, no server):
 
-## Data pipeline
+```bash
+uv run podsearch-catalog                           # once: ~1.8 GB download, ~5 GB db
+uv run podsearch-fetch-rss --feeds 500             # fetch RSS into data/rss/
+uv run podsearch-ingest --impl lancedb             # parse + chunk + embed + insert
+uv run podsearch-serve --impl lancedb              # UI + API on http://localhost:8000
+```
 
-Four independent stages — each is its own script (and `python -m` module).
-Inputs on the left, data stores (all gitignored under `data/`) in the middle,
-consumers on the right:
+Or run the whole thing as one DAG: `task pipeline-lancedb -- --params "FEEDS=500 LANG=en,de"`
+
+Every stage is **idempotent**. Every search needs a **language** (`--lang` on the CLI, `lang` on the API).
+
+---
+
+## Pick a backend
+
+| Implementation | Search function       | Data layout                           | Ingest commands (after catalog + fetch-rss)                     | Notes                                                                                            |
+|----------------|-----------------------|---------------------------------------|-----------------------------------------------------------------|--------------------------------------------------------------------------------------------------|
+| `naive`        | `index.search`        | `vectors.f32` + `corpus.db` hydration | `podsearch-ingest` → `podsearch-index` (sqlite pipeline)        | Pure-Python cosine loop. Slow on purpose; profiling target. **Default** for `serve` and `bench`. |
+| `numpy`        | `index.search_numpy`  | same as `naive`                       | same as `naive`                                                 | Single matrix product, ~100x+ faster than `naive`.                                               |
+| `lancedb`      | `lance_store.search`  | Embedded store: vector + metadata     | `podsearch-ingest --impl lancedb` (fused)                       | No hydration. **Production impl.** Returns cosine **distance**.                                  |
+| `qdrant`       | `qdrant_store.search` | Server collection: vector + payload   | `task qdrant-up`, then `podsearch-ingest --impl qdrant` (fused) | Server-side HNSW. Returns cosine **similarity**.                                                 |
+
+> **Scores differ by impl:** lancedb = cosine distance, qdrant = cosine similarity.
+
+Note the naming: the ingest `--impl` for the `naive`/`numpy` path is `sqlite` (the default).
+
+---
+
+## Command cheat sheet
+
+| I want to…                                 | Command                                                                   |
+|--------------------------------------------|---------------------------------------------------------------------------|
+| Download the feed catalog                  | `uv run podsearch-catalog`                                                |
+| Fetch RSS (default 10k recent en+de feeds) | `uv run podsearch-fetch-rss`                                              |
+| Fetch a small test set                     | `uv run podsearch-fetch-rss --feeds 100 --order episodes --lang en`       |
+| Ingest, sqlite path                        | `uv run podsearch-ingest`                                                 |
+| Build vectors, sqlite path                 | `uv run podsearch-index`                                                  |
+| Ingest + index, lancedb                    | `uv run podsearch-ingest --impl lancedb` (`--rebuild` drops + recreates)  |
+| Start Qdrant                               | `task qdrant-up` (stop: `task qdrant-down`)                               |
+| Ingest + index, qdrant                     | `uv run podsearch-ingest --impl qdrant` (`--rebuild` drops + recreates)   |
+| Serve API + UI on :8000                    | `task serve` or `uv run podsearch-serve [--impl lancedb] [--no-rerank]`   |
+| Benchmark search                           | `uv run podsearch-bench --lang en --impl numpy --queries 20 --repeat 100` |
+| HTTP load test                             | `task load` (needs running service on :8000)                              |
+| Browse sample rows from all stores         | `task notebook`                                                           |
+| Run a DAG once                             | `task pipeline`, `task pipeline-lancedb`, `task pipeline-qdrant`          |
+| Dagu web UI + scheduler                    | `task dagu` (UI on :8081, no auth)                                        |
+| Lint + typecheck + test                    | `task check`                                                              |
+
+---
+
+## Pipeline
+
+Stages 1–2 run for every impl. Stages 3–4 depend on `--impl`: sqlite runs two commands, lancedb/qdrant run one fused command.
 
 ```mermaid
 flowchart TD
@@ -40,124 +71,242 @@ flowchart TD
     DB --> C2["podsearch-fetch-rss"]
     WEB(["podcast hosts"]) --> C2
     C2 -->|"HTTP GET · append parts ·<br/>prune > 14 d"| PQ[("data/rss/part-*.parquet<br/>raw RSS")]
-    PQ --> C3["podsearch-ingest"]
+    PQ --> C3["podsearch-ingest<br/>(--impl sqlite)"]
     C3 -->|"newest version per feed ·<br/>upsert episodes"| CORP[("data/corpus.db<br/>episodes + chunks")]
     CORP --> C4["podsearch-index"]
     C4 -->|"chunk + encode"| VEC[("data/vectors.f32")]
-    VEC -->|"cosine: naive vs numpy"| S5["podsearch-bench · -serve ·<br/>-load"]
-    CORP -->|"hydrate top-k"| S5
+    PQ --> C5["podsearch-ingest --impl lancedb"]
+    C5 -->|"fused parse + chunk<br/>+ encode + insert"| LDB[("data/lancedb/<br/>chunks table")]
+    PQ --> C6["podsearch-ingest --impl qdrant"]
+    C6 -->|"same, into server"| QD[("data/qdrant/<br/>chunks collection")]
+    VEC -->|"cosine: naive vs numpy"| S["podsearch-serve · -bench"]
+    CORP -->|"hydrate top-k"| S
+    LDB -->|"vector + payload"| S
+    QD -->|"vector + payload"| S
 ```
 
-```bash
-# 1. download + extract the Podcast Index catalog (~1.8 GB tgz -> ~5 GB sqlite); skips if present
-uv run podsearch-catalog
+### Stage 1 — `podsearch-catalog` (all impls)
 
-# 2. select feeds from the catalog and fetch their RSS into data/rss/*.parquet
-#    idempotent: skips feeds already stored unless catalog lastUpdate is newer;
-#    parts older than --prune-days (default 14) are deleted afterwards (0 disables)
-uv run podsearch-fetch-rss                          # 10k most recently active en+de feeds
+Download and extract the Podcast Index catalog. Skipped if the db exists.
+
+|     |                                                                                            |
+|-----|--------------------------------------------------------------------------------------------|
+| In  | Catalog tgz from `--url` (~1.8 GB)                                                         |
+| Out | `data/podcastindex_feeds.db` (`--db`): `podcasts` table, metadata only (~5 GB, 4.7M feeds) |
+
+### Stage 2 — `podsearch-fetch-rss` (all impls)
+
+Fetch RSS for selected feeds into parquet parts.
+
+```bash
+uv run podsearch-fetch-rss                          # 10k most recent en+de feeds
 uv run podsearch-fetch-rss --feeds 100 --order episodes --lang en
+```
 
-# 3. parse stored RSS into the episodes corpus (incremental: only new parquet
-#    parts; only the newest fetched version per feed is parsed, episodes upsert)
-uv run podsearch-ingest                             # --max-per-feed 300 caps long feeds
+| Flag              | Default  | Meaning                                |
+|-------------------|----------|----------------------------------------|
+| `--feeds`         | `10000`  | Max feeds to select                    |
+| `--lang`          | `en,de`  | Languages; repeat or comma-separate    |
+| `--min-episodes`  | `20`     | Min episodes per feed                  |
+| `--updated-since` | `0`      | Newest episode at/after this unix time |
+| `--order`         | `recent` | `recent`, `episodes`, `popularity`     |
+| `--concurrency`   | `32`     | Parallel fetches                       |
+| `--per-host`      | `4`      | Parallel fetches per host              |
+| `--prune-days`    | `14`     | Delete older parts; `0` disables       |
 
-# 4. embed episodes into chunks + vectors (full rebuild of derived data)
+- **In:** catalog db (`--db`), feed hosts over HTTP
+- **Out:** `data/rss/part-*.parquet` (`--rss-dir`): RSS body, `fetch_date`, catalog columns
+- **Skips** feeds already stored, unless catalog `lastUpdate` is newer
+- **Retries** failed fetches on the next run
+
+### Stages 3 + 4 — sqlite path (`--impl sqlite`, default; for `naive` / `numpy`)
+
+#### `podsearch-ingest`
+
+Parse RSS parts into the `episodes` table. Incremental; upserts on refetch.
+
+```bash
+uv run podsearch-ingest
+```
+
+| Flag             | Default | Meaning                 |
+|------------------|---------|-------------------------|
+| `--lang`         | `en,de` | Languages to ingest     |
+| `--max-per-feed` | `300`   | Max episodes per feed   |
+| `--parts`        | all     | Max new parts to ingest |
+| `--parser`       | `rs`    | `rs` or `feedparser`    |
+
+- **In:** `data/rss/part-*.parquet` (`--rss-dir`), newest version per feed only
+- **Out:** `data/corpus.db` (`--db`): tables `episodes`, `ingested_parts`
+
+#### `podsearch-index`
+
+Chunk and embed all episodes. **Full rebuild** (not incremental).
+
+```bash
 uv run podsearch-index
-
-# lancedb alternative: stages 3+4 fused — parse + chunk + encode + insert in one
-# pass into data/lancedb/ (vector + metadata columns in a single `chunks` table;
-# delete-then-add per refetched feed; incremental via its own ingested_parts)
-uv run podsearch-ingest --impl lancedb              # threaded parse, batched encode
-uv run podsearch-ingest --impl lancedb --rebuild    # drop and recreate the store
-
-# qdrant alternative: same fused ingest into a Qdrant server (docker compose)
-task qdrant-up                                      # Qdrant on :6333, storage in data/qdrant/
-uv run podsearch-ingest --impl qdrant               # --qdrant-url / PODSEARCH_QDRANT_URL to override
-uv run podsearch-ingest --impl qdrant --rebuild     # drop and recreate the collections
 ```
 
-### Orchestration
+- **In:** `corpus.db` (`--db`) table `episodes`; `--max-chunks-per-episode` (default `3`)
+- **Out:** `data/vectors.f32` (`--vectors`, float32 matrix); `corpus.db` tables `chunks`, `meta` (`vector_row` = matrix row)
 
-The four stages can also run as a [Dagu](https://dagu.cloud) DAG — a lightweight
-local orchestrator (single binary, web UI with run history and per-step logs).
-The DAG lives in `orchestration/podsearch.yaml` and just wraps the `uv run`
-commands above, so the stages' own idempotency still decides what is skipped.
-Dagu is a mise tool (`mise install`; the task entries call it via
-`mise exec -- dagu`), no Python dependency. Steps run with the repo root as
-working dir (the tasks export `PODSEARCH_DIR`; set it yourself if launching
-dagu by hand):
+### Stages 3 + 4 — lancedb (`--impl lancedb`)
 
-The lancedb pipeline is a separate DAG — `orchestration/podsearch-lancedb.yaml`
-(catalog → fetch_rss → ingest_lancedb; the fused stage replaces ingest+index).
-Both DAGs share the catalog db and rss parquet store (fetch once, ingest into
-each backend independently) and both appear in the same dagu UI.
+#### `podsearch-ingest --impl lancedb`
+
+Parse, chunk, embed, and insert in one pass. Incremental.
 
 ```bash
-task dagu               # web UI + scheduler on :8081 (no auth; override port via CLI args)
-task pipeline           # one-shot run of the sqlite DAG
-task pipeline-lancedb   # one-shot run of the lancedb DAG
-task pipeline-qdrant    # one-shot run of the qdrant DAG (needs task qdrant-up)
+uv run podsearch-ingest --impl lancedb
+uv run podsearch-ingest --impl lancedb --rebuild    # drop + recreate store
 ```
 
-Storage layout (all under gitignored `data/`):
+Accepts the same flags as sqlite ingest, plus:
 
-- `podcastindex_feeds.db` — feed catalog (4.7M feeds; metadata only, no episode content)
-- `rss/part-*.parquet` — raw RSS bodies + `fetch_date` + all catalog columns per feed;
-  append-only history, parts pruned after 14 days (pruned feeds get refetched)
-- `corpus.db` — `episodes` (feed_url, guid, podcast, title, link, pubdate, text,
-  language; upserts on refetch so it mirrors the latest stored feed version),
-  `chunks` (vector_row, episode_id, text, language), `ingested_parts`, `meta`
-- `vectors.f32` — raw float32 matrix aligned with `chunks.vector_row`
-- `lancedb/` — alternative store: one `chunks` table (vector + feed_url, guid,
-  podcast, episode, link, pubdate, text, language) + `ingested_parts`; ANN index
-  (HNSW-SQ cosine) is built once the table is large enough to train
-- `qdrant/` — Qdrant server storage (compose volume): `chunks` collection (vector +
-  same payload) and `ingested_parts`
+| Flag          | Default        | Meaning                         |
+|---------------|----------------|---------------------------------|
+| `--lance-dir` | `data/lancedb` | Store directory                 |
+| `--rebuild`   | off            | Drop store, re-ingest all parts |
 
-## Exploring the data
+- **In:** `data/rss/part-*.parquet` (`--rss-dir`)
+- **Out:** `data/lancedb/`: tables `chunks`, `ingested_parts`
+- **`chunks` columns:** vector, feed_url, guid, podcast, episode, link, pubdate, text, language
+- **ANN index** (HNSW-SQ): built once the table is large enough
 
-`notebooks/sample.py` is a marimo notebook that prints a random sample of each
-store above (run `marimo run` instead of `edit` for a read-only view):
+### Stages 3 + 4 — qdrant (`--impl qdrant`)
+
+#### `task qdrant-up`
+
+Start Qdrant via docker compose (`compose.yaml`, `qdrant/qdrant` image). Stop with `task qdrant-down`.
+
+- **Out:** server on `127.0.0.1:6333` (gRPC `6334`); storage in `data/qdrant/`
+
+#### `podsearch-ingest --impl qdrant`
+
+Parse, chunk, embed, and insert in one pass. Incremental. Requires a running Qdrant server.
 
 ```bash
-uv run marimo edit notebooks/sample.py
+uv run podsearch-ingest --impl qdrant
+uv run podsearch-ingest --impl qdrant --rebuild     # drop + recreate collections
 ```
 
-(marimo is a dev-group dep, `>=0.25.2` because that release gates its `loro`
-dep behind `python_version < "3.15"` — no cp315 wheels exist.)
+Accepts the same flags as sqlite ingest, plus:
 
-## Search
+| Flag           | Default                 | Meaning                                |
+|----------------|-------------------------|----------------------------------------|
+| `--qdrant-url` | `http://127.0.0.1:6333` | Server URL; env `PODSEARCH_QDRANT_URL` |
+| `--rebuild`    | off                     | Drop collections, re-ingest all parts  |
 
-Interactive search: `task serve`, then open http://localhost:8000.
+- **In:** `data/rss/part-*.parquet` (`--rss-dir`), running Qdrant server
+- **Out:** collections `chunks` (vector + same payload as lancedb) and `ingested_parts`
+
+---
+
+## Search & serve
+
+### How search works
+
+- **Language-scoped:** every search needs exactly one language ([ADR-0001](docs/decisions/0001-static-embeddings-language-scoped-search.md))
+- **Two stages:** retrieve `max(6k, 30)` chunks → rerank → dedup to `k` episodes
+- **Embedder:** `minishlab/potion-multilingual-128M` (model2vec, 256-dim, ~4k chunks/s)
+- **Reranker:** `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` (~470 MB, **downloaded on first query**)
+- **Torch:** installed from the `pytorch-cpu` uv index (PyPI has no cp315 Linux wheels)
+
+What each impl reads at query time:
+
+| `--impl`         | Reads                                |
+|------------------|--------------------------------------|
+| `naive`, `numpy` | `data/vectors.f32`, `data/corpus.db` |
+| `lancedb`        | `data/lancedb/`                      |
+| `qdrant`         | Qdrant server                        |
+
+### `podsearch-serve`
+
+Serves the FastAPI app and web UI on `:8000`.
 
 ```bash
-# benchmark: queries from podsearch/queries.txt
+task serve                                  # = uv run podsearch-serve
+uv run podsearch-serve --impl lancedb
+```
+
+- `--impl` default: `naive`
+- `--no-rerank`: skip the cross-encoder
+
+| Endpoint                           | Params                                    |
+|------------------------------------|-------------------------------------------|
+| `GET /search`, `GET /search-async` | `q`, `lang` (required), `k` (default `5`) |
+| `GET /api/stats`                   | none                                      |
+| `GET /health`                      | none                                      |
+| `GET /`                            | none (web UI)                             |
+
+- **Out:** JSON hits (episode metadata, chunk text, sigmoid score); web UI at `http://localhost:8000`
+
+### `podsearch-bench`
+
+Times searches over `podsearch/queries.txt` (first `--queries` lines).
+
+```bash
 uv run podsearch-bench --lang en --queries 2                # naive: slow on purpose
 uv run podsearch-bench --lang en --impl numpy --queries 20 --repeat 100
 uv run podsearch-bench --lang en --impl lancedb --queries 20
 uv run podsearch-bench --lang en --impl qdrant --queries 20
+```
 
-# web service (attach target)
-uv run podsearch-serve                                  # serves :8000
+| Flag                       | Default                 | Meaning                      |
+|----------------------------|-------------------------|------------------------------|
+| `--lang`                   | required                | Language to search           |
+| `--impl`                   | `naive`                 | Search backend               |
+| `--queries`                | `5`                     | Queries to run               |
+| `--repeat`                 | `1`                     | Repetitions of the query set |
+| `-k`                       | `5`                     | Hits per query               |
+| `--rerank` / `--no-rerank` | on                      | Cross-encoder rerank         |
+| `--lance-dir`              | `data/lancedb`          | lancedb store                |
+| `--qdrant-url`             | `http://127.0.0.1:6333` | qdrant server                |
 
-# load generator (oha, targets in podsearch/targets.txt; run in a second terminal)
+- **Out (stdout):** `N queries in S s (X s/query)`
+- `python -m` also works: `uv run python -m podsearch.cli.bench`
+
+### `task load`
+
+HTTP load against the running service (port 8000) using [oha](https://github.com/hatoo/oha).
+
+```bash
 task load
 task load CONNECTIONS=2 -- -z 60s
 ```
 
-The `-m` form also works (`uv run python -m podsearch.cli.bench`,
-`uv run python -m podsearch.cli.ingest`).
+- **In:** `podsearch/targets.txt` (override with `TARGETS=`), `CONNECTIONS=` (default `1`)
+- **Out:** oha report: latency and requests/s
 
-## Profiling with Tachyon (Python 3.15, `profiling.sampling`)
+### Exploring the data
 
-`run` takes a script path or `-m module` — it does not search `PATH`, so console
-scripts like `podsearch-ingest` won't resolve; use the `-m` form (the venv script
-path `.venv/bin/podsearch-ingest` also works). Add `-d SECONDS` to cap the run.
+Sample random rows from every store under `data/` in a marimo notebook (one sample per store).
 
-The stages are idempotent, so the examples pass scratch outputs to force real
-work without clobbering the actual stores: `--db data/corpus-prof.db` (ingest),
-`--rss-dir data/rss-prof` (fetch), `--vectors data/vectors-prof.f32` (index).
+```bash
+uv run marimo edit notebooks/sample.py    # or: task notebook
+```
+
+Use `marimo run` instead of `edit` for read-only.
+
+---
+
+## Profiling
+
+Profile any command with Python 3.15 `profiling.sampling`.
+
+- **Target:** a command via `-m module` or script path (no `PATH` lookup), or a PID for `attach`
+- **Output formats:** `--flamegraph` / `--heatmap` → HTML; `--collapsed` → folded stacks; `--binary` → `.bin` (render with `replay`); no `-o` → live stats
+
+| Flag                              | Meaning              |
+|-----------------------------------|----------------------|
+| `-d SECONDS`                      | Stop after N seconds |
+| `--db data/corpus-prof.db`        | Scratch ingest db    |
+| `--rss-dir data/rss-prof`         | Scratch fetch dir    |
+| `--vectors data/vectors-prof.f32` | Scratch index file   |
+
+Use scratch paths to force real work without touching real stores.
+
+### Profile a pipeline stage
 
 ```bash
 # ingest: feedparser is CPU-bound — the classic flamegraph target
@@ -185,20 +334,17 @@ uv run python -m profiling.sampling run --binary -o results/ingest.bin -m podsea
 uv run python -m profiling.sampling replay --flamegraph -o results/ingest-replay.html results/ingest.bin
 ```
 
-Profiling the search:
+### Profile search
 
 ```bash
 uv run python -m profiling.sampling run --binary -o local/search.bin -m podsearch.cli.bench --lang de --impl qdrant --queries 5
 uv run python -m profiling.sampling replay --flamegraph -o local/search-replay.html local/search.bin
-firefox local/search-replay.html
 uv run python -m profiling.sampling replay --heatmap -o local/search-heatmap.html local/search.bin
-firefox local/search-heatmap/index.html
 ```
 
-## Attach to the running server
+### Attach to a running server
 
-**Requires ptrace permission.** `run` works out of the box (the profiler is the parent).
-`attach` to an already-running process is blocked by `ptrace_scope=1` until you run once:
+`attach` needs `ptrace_scope=0` (`run` works out of the box — the profiler is the parent):
 
 ```bash
 echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope   # reset to 1 when done
@@ -216,7 +362,7 @@ uv run python -m profiling.sampling attach -d 20 --mode=cpu  $PID   # only on-CP
 uv run python -m profiling.sampling attach --async-aware -d 20 $PID # with load on /search-async
 ```
 
-## Comparison
+### Compare with other profilers
 
 ```bash
 # deterministic profiler (formerly cProfile)
@@ -228,37 +374,80 @@ uvx py-spy record -o results/pyspy.svg -- uv run python -m podsearch.cli.ingest 
 uvx py-spy top --pid $PID
 ```
 
-## Development
+---
+
+## Orchestration (Dagu)
+
+DAGs live in `orchestration/`. Install Dagu with `mise install`.
+
+| DAG                                 | Impl    | Steps                                          |
+|-------------------------------------|---------|------------------------------------------------|
+| `podsearch.yaml`                    | sqlite  | catalog → fetch_rss → ingest → index           |
+| `podsearch-lancedb.yaml`            | lancedb | catalog → fetch_rss → ingest_lancedb           |
+| `podsearch-lancedb-index-only.yaml` | lancedb | ingest_lancedb `--rebuild` from existing parts |
+| `podsearch-qdrant.yaml`             | qdrant  | catalog → fetch_rss → ingest_qdrant            |
+
+| Task                                                             | What it does                                                                                      |
+|------------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
+| `task dagu`                                                      | Web UI on `:8081` (no auth) + scheduler; reads `orchestration/*.yaml`; run history in `data/dagu` |
+| `task pipeline`, `task pipeline-lancedb`, `task pipeline-qdrant` | Run one DAG once; record kept in Dagu. `pipeline-qdrant` needs `task qdrant-up`.                  |
 
 ```bash
-task check      # lint + typecheck + test (ruff, ty, pytest)
-task catalog    # download the feed catalog
-task fetch      # fetch RSS into data/rss/
-task ingest     # parse RSS into corpus.db
-task index      # build vectors.f32
-task pipeline   # run the sqlite pipeline once via Dagu
-task pipeline-lancedb  # run the lancedb pipeline once via Dagu
-task dagu       # Dagu web UI on :8081
-task bench      # = uv run podsearch-bench
-task serve      # = uv run podsearch-serve
-task load       # = oha -c 1 -p 1 -t 30s --urls-from-file podsearch/targets.txt
+task pipeline -- --params "FEEDS=500 LANG=en,de"
 ```
 
-## Files
+DAG params: `FEEDS`, `LANG`.
 
-- `podsearch/core/paths.py` — data/ file locations
-- `podsearch/core/catalog.py` — catalog download + feed selection SQL
-- `podsearch/core/fetch.py` — idempotent async RSS fetch (bounded, per-host limited); decodes every feed to UTF-8 at fetch time
-- `podsearch/core/rss_store.py` — `data/rss` parquet schema, atomic streaming `PartWriter`, `already_fetched`, `prune_parts`
-- `podsearch/core/parse.py` — `parse_feed`, `lang_code` (RSS body -> episode dicts)
-- `podsearch/core/corpus.py` — `strip_html`, `chunk`, corpus.db schema, `ingest_parts`
-- `podsearch/core/index.py` — `build_index`, `search` (naive), `search_numpy`, `rerank` (cross-encoder), hit hydration
-- `podsearch/core/lance_store.py` — fused ingest+index + `search` for `--impl lancedb`
-- `podsearch/core/qdrant_store.py` — fused ingest+index + `search` for `--impl qdrant`
-- `podsearch/core/ingest_common.py` — chunking/embedding helpers shared by both fused stores
-- `podsearch/api.py` — FastAPI `/search`, `/search-async` (blocks the event loop), `/health`
-- `podsearch/cli/` — one entrypoint module per `podsearch-*` console script:
-  `catalog`, `fetch_rss`, `ingest`, `indexing` (stages 1-4), `serve`, `query`, `bench`
-- `podsearch/queries.txt` — 20 queries used by `bench`
-- `podsearch/targets.txt` — oha URL list used by `task load` (German podcasts)
-- `tests/` — unit tests for corpus, fetch, and index helpers
+---
+
+## Storage layout
+
+Everything lives under gitignored `data/`:
+
+| Store                   | Contents                                                                                                        |
+|-------------------------|-----------------------------------------------------------------------------------------------------------------|
+| `podcastindex_feeds.db` | Feed catalog (4.7M feeds; metadata only, no episode content)                                                    |
+| `rss/part-*.parquet`    | Raw RSS bodies + `fetch_date` + catalog cols; append-only, pruned after 14 d                                    |
+| `corpus.db`             | `episodes` (upserted, mirrors latest feed version), `chunks` (`vector_row` alignment), `ingested_parts`, `meta` |
+| `vectors.f32`           | Float32 matrix, memory-mapped, aligned with `chunks.vector_row`                                                 |
+| `lancedb/`              | `chunks` table (vector + metadata cols) + `ingested_parts`; HNSW-SQ ANN                                         |
+| `qdrant/`               | Qdrant server volume: `chunks` + `ingested_parts` collections                                                   |
+
+---
+
+## Development
+
+| Task                                          | Effect                                                    |
+|-----------------------------------------------|-----------------------------------------------------------|
+| `task check`                                  | lint + typecheck + test (ruff, ty, pytest)                |
+| `task lint`                                   | `ruff check --fix` + `ruff format`                        |
+| `task typecheck`                              | `ty check`                                                |
+| `task test`                                   | `pytest --cov`                                            |
+| `task catalog` / `fetch` / `ingest` / `index` | Pipeline stages = `podsearch-*` commands                  |
+| `task bench` / `serve` / `load`               | = `podsearch-bench --lang en` / `podsearch-serve` / oha   |
+| `task notebook`                               | `marimo edit notebooks/sample.py`                         |
+| `task pipeline[-lancedb\|-qdrant]` / `dagu`   | Dagu runs / UI :8081                                      |
+| `task qdrant-up` / `qdrant-down`              | Start/stop Qdrant container                               |
+| `task update-dependencies`                    | `uv lock --upgrade` + sync + `prek update` + `task check` |
+
+---
+
+## Code map
+
+| Path                              | Purpose                                                                                                           |
+|-----------------------------------|-------------------------------------------------------------------------------------------------------------------|
+| `podsearch/core/paths.py`         | `data/` file locations                                                                                            |
+| `podsearch/core/catalog.py`       | Catalog download + feed selection SQL                                                                             |
+| `podsearch/core/fetch.py`         | Idempotent async RSS fetch; decodes every feed to UTF-8 at fetch time                                             |
+| `podsearch/core/rss_store.py`     | Parquet schema, streaming `PartWriter`, `already_fetched`, `prune_parts`                                          |
+| `podsearch/core/parse.py`         | `parse_feed`, `lang_code` (RSS body → episode dicts)                                                              |
+| `podsearch/core/corpus.py`        | `strip_html`, `chunk`, corpus.db schema, `ingest_parts`                                                           |
+| `podsearch/core/index.py`         | `build_index`, `search` (naive), `search_numpy`, `rerank`, hit hydration                                          |
+| `podsearch/core/lance_store.py`   | Fused ingest + index and `search` (`--impl lancedb`)                                                              |
+| `podsearch/core/qdrant_store.py`  | Fused ingest + index and `search` (`--impl qdrant`)                                                               |
+| `podsearch/core/ingest_common.py` | Chunk/encode helpers shared by fused stores                                                                       |
+| `podsearch/api.py`                | FastAPI `/search`, `/search-async`, `/health`                                                                     |
+| `podsearch/cli/`                  | One entrypoint per `podsearch-*` script: `catalog`, `fetch_rss`, `ingest`, `indexing`, `serve`, `bench`, `common` |
+| `podsearch/queries.txt`           | 20 queries for `bench`                                                                                            |
+| `podsearch/targets.txt`           | oha URL list for `task load` (German podcasts)                                                                    |
+| `tests/`                          | Unit tests for corpus, fetch, index helpers                                                                       |
