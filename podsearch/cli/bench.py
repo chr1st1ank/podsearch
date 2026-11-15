@@ -21,7 +21,7 @@ def main() -> None:
     parser.add_argument("-k", type=int, default=5, help="hits per query")
     parser.add_argument("--lang", required=True, help="language code to search within (ADR-0001)")
     parser.add_argument(
-        "--impl", choices=common.IMPLS, default="naive", help="search implementation"
+        "--impl", choices=[*common.IMPLS, "all"], default="naive", help="search implementation"
     )
     parser.add_argument(
         "--lance-dir", type=Path, default=None, help="lancedb store (--impl lancedb)"
@@ -35,18 +35,22 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    store = common.open_store(args.impl, args.lance_dir, args.qdrant_url)
     model = index.load_model()
     reranker = index.load_reranker() if args.rerank else None
     queries = common.QUERIES_PATH.read_text().splitlines()[: args.queries]
-    search = common.search_fn(args.impl)
-    t0 = time.perf_counter()
-    for _rep in range(args.repeat):
-        for q in queries:
-            search(store, model, reranker, q, args.lang, args.k)
-    elapsed = time.perf_counter() - t0
-    n = len(queries) * args.repeat
-    print(f"{n} queries in {elapsed:.1f} s ({elapsed / n:.2f} s/query)")
+
+    implementations = common.IMPLS if args.impl == "all" else [args.impl]
+    for impl in implementations:
+        print(f"Running benchmark for implementation: {impl}")
+        store = common.open_store(impl, args.lance_dir, args.qdrant_url)
+        search = common.search_fn(impl)
+        t0 = time.perf_counter()
+        for _rep in range(args.repeat):
+            for q in queries:
+                search(store, model, reranker, q, args.lang, args.k)
+        elapsed = time.perf_counter() - t0
+        n = len(queries) * args.repeat
+        print(f"{n} queries in {elapsed:.1f} s ({elapsed / n:.2f} s/query)")
 
 
 if __name__ == "__main__":
