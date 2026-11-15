@@ -31,9 +31,6 @@ if TYPE_CHECKING:
 
 CHUNKS_TABLE = "chunks"
 PARTS_TABLE = "ingested_parts"
-# Below this many rows, flat search in LanceDB's Rust core is fast and ANN
-# training (IVF/HNSW) has too little data to be worthwhile.
-MIN_ROWS_FOR_ANN = 50_000
 
 PARTS_SCHEMA = pa.schema([("path", pa.string()), ("ingested_at", pa.int64())])
 
@@ -86,18 +83,17 @@ def _ensure_btree(tbl: Table) -> None:
 
 
 def _ensure_ann(tbl: Table) -> None:
-    """Build the ANN index once the store is big enough to warrant it.
+    """Build the ANN index once, after ingest+optimize so it trains on the final rows.
 
-    Run after ingest+optimize so it trains once on the final row count.
     Existing indexes are left alone: `create_index` would retrain them from
     scratch, whereas `optimize()` updates them incrementally.
     """
     from lancedb.index import HnswSq
 
     indexed = {col for idx in tbl.list_indices() for col in idx.columns}
-    if "vector" not in indexed and (n := tbl.count_rows()) >= MIN_ROWS_FOR_ANN:
-        print(f"building HNSW index on {n:,} vectors")
-        tbl.create_index("vector", config=HnswSq(distance_type="cosine"))
+    if "vector" not in indexed:
+        print(f"building HNSW index on {tbl.count_rows():,} vectors")
+        tbl.create_index("vector", config=HnswSq(distance_type="dot"))
 
 
 def ingest_parts(
@@ -184,7 +180,7 @@ def search(tbl: Table, model, reranker, q: str, lang: str, k: int = 5) -> list[H
     q_vec = np.asarray(model.encode([q])[0], dtype=np.float32)
     builder = cast("LanceVectorQueryBuilder", tbl.search(q_vec))
     rows = (
-        builder.metric("cosine")
+        builder.metric("dot")
         .where(f"language = '{lang.replace(chr(39), chr(39) * 2)}'")
         .limit(index.rerank_limit(k))
         .to_list()

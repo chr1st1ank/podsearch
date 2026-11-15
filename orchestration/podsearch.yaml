@@ -2,9 +2,9 @@ name: podsearch
 description: Podcast Index catalog -> RSS fetch -> corpus ingest -> embedding index
 type: graph
 
-# steps must run at the repo root so `uv run` finds the project; Taskfile
-# exports PODSEARCH_DIR={{.ROOT_DIR}} (set it manually if launching dagu by hand)
-working_dir: ${PODSEARCH_DIR}
+# dagu resolves a relative working_dir against the DAG file's dir, so `..`
+# is the repo root (env vars are NOT expanded here - steps get a scrubbed env)
+working_dir: ..
 
 defaults:
   retry_policy:

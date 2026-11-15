@@ -77,7 +77,8 @@ task update-dependencies  # upgrade locks + hooks within cooldown, then check
 ```
 
 Run from the repository root. Dagu runs via `mise exec -- dagu` (mise tool, not a
-Python dep); tasks export `PODSEARCH_DIR` for the DAGs.
+Python dep). DAGs use `working_dir: ..` (resolved relative to the DAG file, so
+repo root); env vars like `${PODSEARCH_DIR}` are NOT expanded by dagu.
 
 ## House rules
 

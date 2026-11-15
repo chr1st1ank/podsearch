@@ -1,0 +1,21 @@
+name: podsearch-lancedb-index-only
+description: LanceDB ingest+index based on existing data
+type: graph
+
+# resolved relative to this file -> steps run at the repo root
+working_dir: ..
+
+defaults:
+  retry_policy:
+    limit: 1
+    interval_sec: 30
+
+params:
+  - name: LANG
+    default: "de" # "de,en" = the CLI default
+    description: Comma-separated feed languages (podsearch-fetch-rss and podsearch-ingest --lang)
+
+# --rebuild drops the chunks + ingested_parts tables: no rm step needed
+steps:
+  - id: ingest_lancedb
+    run: uv run podsearch-ingest --impl lancedb --lang=${LANG} --rebuild
