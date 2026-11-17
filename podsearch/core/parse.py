@@ -25,20 +25,21 @@ def parse_feed(
     language: str | None = None,
 ) -> list[dict[str, Any]]:
     """Parse one RSS body into episode dicts. Used by the ingest stage."""
-    # TODO: Bottleneck (feedparser impl). Flags lead to 1.65x speedup
     fp = feedparser_rs if impl == "rs" else feedparser
     parsed = fp.parse(body, sanitize_html=False, resolve_relative_uris=False)
     feed_title = parsed.feed.get("title")
     podcast_name = podcast or (str(feed_title) if feed_title else "")
     lang = lang_code(language)
     episodes: list[dict[str, Any]] = []
-    entries = parsed.entries[:max_episodes] if max_episodes is not None else parsed.entries
+    entries = [e for e in parsed.entries if e.get("link")]  # unlinkable hits are useless: drop
+    if max_episodes is not None:
+        entries = entries[:max_episodes]
     for entry in entries:
         if entry.get("content"):
             description = entry.content[0].get("value", "")
         else:
             description = entry.get("summary") or entry.get("itunes_summary") or ""
-        guid = entry.get("id") or entry.get("link") or entry.get("title") or ""
+        guid = entry.get("id") or entry["link"]
         parsed_date = entry.get("published_parsed") or entry.get("updated_parsed")
         episodes.append(
             {
@@ -46,7 +47,7 @@ def parse_feed(
                 "guid": guid,
                 "podcast": podcast_name,
                 "title": entry.get("title") or "(untitled)",
-                "link": entry.get("link") or "",
+                "link": entry["link"],
                 "pubdate": calendar.timegm(parsed_date) if parsed_date else 0,
                 "description": description,
                 "language": lang,

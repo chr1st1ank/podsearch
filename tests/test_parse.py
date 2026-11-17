@@ -16,7 +16,7 @@ RSS = b"""<?xml version="1.0"?>
     </item>
     <item>
       <title>Episode Two</title>
-      <guid>guid-2</guid>
+      <guid isPermaLink="false">guid-2</guid>
     </item>
   </channel>
 </rss>
@@ -25,7 +25,7 @@ RSS = b"""<?xml version="1.0"?>
 
 def test_parse_feed_entries() -> None:
     eps = parse.parse_feed(RSS.decode(), "https://feed", "Feed Title")
-    assert len(eps) == 2
+    assert len(eps) == 1  # Episode Two has no <link> -> dropped
     first = eps[0]
     assert first["feed_url"] == "https://feed"
     assert first["guid"] == "guid-1"
@@ -37,6 +37,13 @@ def test_parse_feed_entries() -> None:
 
 def test_parse_feed_max_episodes() -> None:
     assert len(parse.parse_feed(RSS.decode(), "u", "p", max_episodes=1)) == 1
+
+
+def test_parse_feed_max_episodes_counts_linked_entries_only() -> None:
+    linkless = "<item><title>Linkless</title></item>"
+    body = RSS.decode().replace("<item>", linkless + "<item>", 1)
+    eps = parse.parse_feed(body, "u", "p", max_episodes=1)
+    assert [e["title"] for e in eps] == ["Episode One"]
 
 
 def test_parse_feed_rs_matches_feedparser() -> None:
