@@ -27,6 +27,19 @@ CHUNKS_COLLECTION = "chunks"
 PARTS_COLLECTION = "ingested_parts"
 UPSERT_BATCH = 1_000
 INDEXING_THRESHOLD_KB = 20_000  # qdrant's default; restored after bulk load
+# `text` gets a word-level full-text index (no stemming) so search can pull in chunks that
+# literally contain the query's words - model2vec splits German compounds ("Suchmaschine"
+# -> "Such"+"maschine") and misses them.
+PAYLOAD_INDEXES: dict[str, models.PayloadSchemaType | models.TextIndexParams] = {
+    "feed_url": models.PayloadSchemaType.KEYWORD,
+    "guid": models.PayloadSchemaType.KEYWORD,
+    "language": models.PayloadSchemaType.KEYWORD,
+    "text": models.TextIndexParams(
+        type=models.TextIndexType.TEXT,
+        tokenizer=models.TokenizerType.MULTILINGUAL,
+        lowercase=True,
+    ),
+}
 _NS = uuid.NAMESPACE_URL
 
 
@@ -46,6 +59,14 @@ def open_chunks(url: str = QDRANT_URL) -> QdrantClient:
     return client
 
 
+def _ensure_payload_indexes(client: QdrantClient) -> None:
+    """Create missing payload indexes; also migrates collections that predate one."""
+    existing = client.get_collection(CHUNKS_COLLECTION).payload_schema
+    for field, schema in PAYLOAD_INDEXES.items():
+        if field not in existing:
+            client.create_payload_index(CHUNKS_COLLECTION, field, schema)
+
+
 def _ensure_collections(client: QdrantClient, dim: int) -> None:
     if not client.collection_exists(CHUNKS_COLLECTION):
         client.create_collection(
@@ -53,9 +74,7 @@ def _ensure_collections(client: QdrantClient, dim: int) -> None:
             vectors_config=models.VectorParams(size=dim, distance=models.Distance.COSINE),
             optimizers_config=models.OptimizersConfigDiff(indexing_threshold=0),
         )
-        client.create_payload_index(CHUNKS_COLLECTION, "feed_url", models.PayloadSchemaType.KEYWORD)
-        client.create_payload_index(CHUNKS_COLLECTION, "guid", models.PayloadSchemaType.KEYWORD)
-        client.create_payload_index(CHUNKS_COLLECTION, "language", models.PayloadSchemaType.KEYWORD)
+    _ensure_payload_indexes(client)
 
 
 def _stats_id() -> str:
@@ -223,17 +242,31 @@ def ingest_parts(
 
 
 def search(client: QdrantClient, model, reranker, q: str, lang: str, k: int = 5) -> list[Hit]:
-    """Vector search scoped to one language; payload carries all metadata."""
+    """Language-scoped candidates from two dense queries, then rerank.
+
+    One query is plain vector search; the other is vector search restricted to chunks whose
+    text contains every query word (full-text index), which rescues terms the static
+    embedder fragments, e.g. German compounds. Both rank by cosine, so they merge by id.
+    """
     vec = [float(x) for x in model.encode([q])[0]]
-    res = client.query_points(
+    lang_cond = models.FieldCondition(key="language", match=models.MatchValue(value=lang))
+    text_cond = models.FieldCondition(key="text", match=models.MatchText(text=q))
+    limit = index.rerank_limit(k) * 2 // 3  # two sources -> same reranker load as one
+    dense, lexical = client.query_batch_points(
         CHUNKS_COLLECTION,
-        query=vec,
-        limit=index.rerank_limit(k),
-        query_filter=models.Filter(
-            must=[models.FieldCondition(key="language", match=models.MatchValue(value=lang))]
-        ),
-        with_payload=True,
+        [
+            models.QueryRequest(
+                query=vec, filter=models.Filter(must=[lang_cond]), limit=limit, with_payload=True
+            ),
+            models.QueryRequest(
+                query=vec,
+                filter=models.Filter(must=[lang_cond, text_cond]),
+                limit=limit,
+                with_payload=True,
+            ),
+        ],
     )
+    points = {p.id: p for p in [*dense.points, *lexical.points]}
     candidates = [
         Hit(
             podcast=p.payload["podcast"],
@@ -246,7 +279,7 @@ def search(client: QdrantClient, model, reranker, q: str, lang: str, k: int = 5)
             guid=p.payload["guid"],
             language=p.payload.get("language", ""),
         )
-        for p in res.points
+        for p in points.values()
         if p.payload is not None
     ]
     return index.rerank(reranker, q, candidates, k)

@@ -1,5 +1,6 @@
 """Tests for podsearch.core.qdrant_store using synthetic parquet parts and in-memory qdrant."""
 
+import numpy as np
 import pytest
 from qdrant_client import QdrantClient
 
@@ -110,3 +111,26 @@ def test_ingest_langs_filter_skips_other_languages(env) -> None:
     hits = qdrant_store.search(client, FakeModel(), FakeReranker(), "query", "en", k=10)
     assert [h.episode for h in hits] == ["Episode one"]
     assert client.count(qdrant_store.CHUNKS_COLLECTION).count == 2
+
+
+class _CompoundBlindModel:
+    """Embeds chunks mentioning 'zzz' far from every query, mimicking a fragmented compound."""
+
+    def encode(self, texts: list[str]) -> np.ndarray:
+        return np.asarray([[-1.0, 0.0] if "zzz" in t else [1.0, 0.0] for t in texts], np.float32)
+
+
+def test_search_finds_chunk_the_embedding_misses_via_text_match(env, monkeypatch) -> None:
+    """Candidates also come from chunks containing the query words, not only nearest vectors."""
+    rss_dir, client = env
+    for i in range(6):
+        _write_part(rss_dir, i, f"decoy{i}", f"Decoy {i}", 1000)
+    _write_part(rss_dir, 6, "target", "Target", 1000, desc="zzz Suchmaschine")
+    qdrant_store.ingest_parts(_CompoundBlindModel(), rss_dir=rss_dir, client=client)
+    monkeypatch.setattr(qdrant_store.index, "rerank_limit", lambda k: 3)  # 2 per source
+
+    hits = qdrant_store.search(
+        client, _CompoundBlindModel(), FakeReranker(), "Suchmaschine", "en", k=10
+    )
+
+    assert "Target" in [h.episode for h in hits]

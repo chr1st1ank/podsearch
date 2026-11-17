@@ -30,7 +30,7 @@ Every stage is **idempotent**. Every search needs a **language** (`--lang` on th
 | `naive`        | `index.search`        | `vectors.f32` + `corpus.db` hydration | `podsearch-ingest` → `podsearch-index` (sqlite pipeline)        | Pure-Python cosine loop. Slow on purpose; profiling target. **Default** for `serve` and `bench`. |
 | `numpy`        | `index.search_numpy`  | same as `naive`                       | same as `naive`                                                 | Single matrix product, ~100x+ faster than `naive`.                                               |
 | `lancedb`      | `lance_store.search`  | Embedded store: vector + metadata     | `podsearch-ingest --impl lancedb` (fused)                       | No hydration. **Production impl.** Returns cosine **distance**.                                  |
-| `qdrant`       | `qdrant_store.search` | Server collection: vector + payload   | `task qdrant-up`, then `podsearch-ingest --impl qdrant` (fused) | Server-side HNSW. Returns cosine **similarity**.                                                 |
+| `qdrant`       | `qdrant_store.search` | Server collection: vector + payload   | `task qdrant-up`, then `podsearch-ingest --impl qdrant` (fused) | Server-side HNSW + full-text index on `text`. Returns cosine **similarity**. |
 
 > **Scores differ by impl:** lancedb = cosine distance, qdrant = cosine similarity.
 
