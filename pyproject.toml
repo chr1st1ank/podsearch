@@ -8,7 +8,6 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "httpx>=0.28",
-    "feedparser>=6.0",
     "pyarrow>=18.0",
     "polars>=2.0.0",
     "feedparser-rs>=0.7.1",

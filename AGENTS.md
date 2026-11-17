@@ -30,7 +30,6 @@ CLI suite sit on top. Python 3.15, uv/hatchling, flat layout (`podsearch/` at ro
 - `core/` is the pure library; `cli/` modules only parse args and call `core/`.
 - `core/` must not import from `cli/` or `api`.
 - `--impl` selects the storage/search backend (`naive|numpy|lancedb|qdrant`);
-  `--parser` selects the feed parser (`feedparser|rs`).
 - Search is language-scoped (ADR-0001): `lang` is a required argument on every
   search path and restricts candidates to same-language chunks. Feed-declared
   `language` propagates catalog → parquet parts → episodes → chunks.

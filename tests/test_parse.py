@@ -46,11 +46,6 @@ def test_parse_feed_max_episodes_counts_linked_entries_only() -> None:
     assert [e["title"] for e in eps] == ["Episode One"]
 
 
-def test_parse_feed_rs_matches_feedparser() -> None:
-    args = (RSS.decode(), "https://feed", "Feed Title")
-    assert parse.parse_feed(*args, impl="rs") == parse.parse_feed(*args, impl="feedparser")
-
-
 def test_lang_code() -> None:
     assert parse.lang_code("de-AT") == "de"
     assert parse.lang_code(" EN ") == "en"

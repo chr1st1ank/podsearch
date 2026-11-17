@@ -20,7 +20,6 @@ from qdrant_client import QdrantClient, models
 
 from podsearch.core import index, ingest_common, rss_store
 from podsearch.core.index import ENCODE_BATCH, MAX_CHUNKS_PER_EPISODE, Hit
-from podsearch.core.parse import Parser
 from podsearch.core.paths import QDRANT_URL, RSS_DIR
 
 CHUNKS_COLLECTION = "chunks"
@@ -149,7 +148,6 @@ def ingest_parts(
     rss_dir: Path = RSS_DIR,
     client: QdrantClient | None = None,
     max_per_feed: int = 300,
-    parser_impl: Parser = "rs",
     max_chunks: int = MAX_CHUNKS_PER_EPISODE,
     rebuild: bool = False,
     max_parts: int | None = None,
@@ -172,9 +170,7 @@ def ingest_parts(
     dim = len(model.encode(["dimension probe"])[0])
     _ensure_collections(client, dim)
     latest = rss_store.latest_fetch_dates(rss_dir)
-    parse = partial(
-        ingest_common.parse_feed, max_episodes=max_per_feed, impl=parser_impl, langs=langs
-    )
+    parse = partial(ingest_common.parse_feed, max_episodes=max_per_feed, langs=langs)
     for px, part in enumerate(parts):
         t0 = time.perf_counter()
         # parts written before ADR-0001 lack the language column -> 'und'

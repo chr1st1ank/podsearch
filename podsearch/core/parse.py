@@ -2,12 +2,9 @@
 
 import calendar
 import re
-from typing import Any, Literal
+from typing import Any
 
-import feedparser  # TODO: kept as slow baseline for the profiling demo
-import feedparser_rs  # TODO: no manylinux cp315 wheel yet - builds from sdist (needs cargo)
-
-Parser = Literal["rs", "feedparser"]
+import feedparser_rs  # no manylinux cp315 wheel yet - builds from sdist (needs cargo)
 
 
 def lang_code(language: str | None) -> str:
@@ -21,12 +18,10 @@ def parse_feed(
     feed_url: str,
     podcast: str,
     max_episodes: int | None = None,
-    impl: Parser = "rs",
     language: str | None = None,
 ) -> list[dict[str, Any]]:
     """Parse one RSS body into episode dicts. Used by the ingest stage."""
-    fp = feedparser_rs if impl == "rs" else feedparser
-    parsed = fp.parse(body, sanitize_html=False, resolve_relative_uris=False)
+    parsed = feedparser_rs.parse(body, sanitize_html=False, resolve_relative_uris=False)
     feed_title = parsed.feed.get("title")
     podcast_name = podcast or (str(feed_title) if feed_title else "")
     lang = lang_code(language)

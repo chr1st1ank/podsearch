@@ -134,7 +134,6 @@ uv run podsearch-ingest
 | `--lang`         | `en,de` | Languages to ingest     |
 | `--max-per-feed` | `300`   | Max episodes per feed   |
 | `--parts`        | all     | Max new parts to ingest |
-| `--parser`       | `rs`    | `rs` or `feedparser`    |
 
 - **In:** `data/rss/part-*.parquet` (`--rss-dir`), newest version per feed only
 - **Out:** `data/corpus.db` (`--db`): tables `episodes`, `ingested_parts`
@@ -309,7 +308,7 @@ Use scratch paths to force real work without touching real stores.
 ### Profile a pipeline stage
 
 ```bash
-# ingest: feedparser is CPU-bound — the classic flamegraph target
+# ingest: feedparser_rs builds from sdist (needs cargo) until a cp315 linux wheel ships
 uv run python -m profiling.sampling run -m podsearch.cli.ingest --db data/corpus-prof.db
 uv run python -m profiling.sampling run --flamegraph -o results/ingest.html -m podsearch.cli.ingest --db data/corpus-prof.db
 uv run python -m profiling.sampling run --heatmap    -o results/ingest-heat -m podsearch.cli.ingest --db data/corpus-prof.db

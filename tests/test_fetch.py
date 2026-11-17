@@ -42,8 +42,7 @@ def _stored(rss_dir) -> pl.DataFrame:
 def test_decode_declared_latin1_is_rewritten_and_parses() -> None:
     text = fetch.decode_feed(LATIN1_RSS.encode("latin-1"))
     assert 'encoding="utf-8"' in text
-    for impl in ("rs", "feedparser"):
-        assert parse.parse_feed(text, "u", "p", impl=impl)[0]["title"] == "Grüße"
+    assert parse.parse_feed(text, "u", "p")[0]["title"] == "Grüße"
 
 
 def test_decode_uses_http_charset_without_declaration() -> None:

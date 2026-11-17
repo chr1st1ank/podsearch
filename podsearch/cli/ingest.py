@@ -35,9 +35,6 @@ def main() -> None:
         "--max-per-feed", type=int, default=300, help="maximum episodes ingested per feed"
     )
     parser.add_argument(
-        "--parser", choices=["feedparser", "rs"], default="rs", help="feed parser implementation"
-    )
-    parser.add_argument(
         "--parts",
         type=int,
         default=None,
@@ -64,7 +61,6 @@ def main() -> None:
         store_args = dict(
             rss_dir=args.rss_dir,
             max_per_feed=args.max_per_feed,
-            parser_impl=args.parser,
             rebuild=args.rebuild,
             max_parts=args.parts,
         )
@@ -82,9 +78,7 @@ def main() -> None:
             f"{stats['chunks']:,} chunks ({time.perf_counter() - t0:.1f} s)"
         )
     else:
-        stats = corpus.ingest_parts(
-            args.rss_dir, args.db, args.max_per_feed, args.parser, args.parts, langs
-        )
+        stats = corpus.ingest_parts(args.rss_dir, args.db, args.max_per_feed, args.parts, langs)
         print(
             f"ingested {stats['parts']} new parts ({stats['skipped']} already done), "
             f"{stats['episodes']:,} episodes ({time.perf_counter() - t0:.1f} s)"

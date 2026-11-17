@@ -107,7 +107,6 @@ def ingest_parts(
     rss_dir: Path = RSS_DIR,
     db_path: Path = CORPUS_DB,
     max_per_feed: int = 300,
-    impl: parse.Parser = "rs",
     max_parts: int | None = None,
     langs: tuple[str, ...] | None = None,
 ) -> dict[str, int]:
@@ -136,7 +135,7 @@ def ingest_parts(
                     continue
                 if langs is not None and parse.lang_code(language) not in langs:
                     continue
-                for ep in parse.parse_feed(body, url, podcast or "", max_per_feed, impl, language):
+                for ep in parse.parse_feed(body, url, podcast or "", max_per_feed, language):
                     text = strip_html(f"{ep['title']}\n\n{ep['description']}")
                     if not text:
                         continue
