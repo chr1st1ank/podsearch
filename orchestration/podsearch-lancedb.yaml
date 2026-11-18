@@ -1,9 +1,8 @@
 name: podsearch-lancedb
-description: Podcast Index catalog -> RSS fetch -> fused LanceDB ingest+index
+description: LanceDB ingest+index based on existing data
 type: graph
 
-# dagu resolves a relative working_dir against the DAG file's dir, so `..`
-# is the repo root (env vars are NOT expanded here - steps get a scrubbed env)
+# resolved relative to this file -> steps run at the repo root
 working_dir: ..
 
 defaults:
@@ -12,25 +11,11 @@ defaults:
     interval_sec: 30
 
 params:
-  - name: FEEDS
-    default: "100000"
-    description: Number of feeds to fetch (podsearch-fetch-rss --feeds)
   - name: LANG
-    default: "de"
-    # default: "de,en"  # de + en (the CLI default)
+    default: "de" # "de,en" = the CLI default
     description: Comma-separated feed languages (podsearch-fetch-rss and podsearch-ingest --lang)
 
-# catalog + fetch_rss share data/podcastindex_feeds.db and data/rss/*.parquet
-# with the sqlite pipeline (fetch is idempotent); ingest bookkeeping lives in
-# the lancedb store itself, so the pipelines stay independent.
+# --rebuild drops the chunks + ingested_parts tables
 steps:
-  - id: catalog
-    run: uv run podsearch-catalog
-
-  - id: fetch_rss
-    run: uv run podsearch-fetch-rss --feeds ${FEEDS} --lang=${LANG}
-    depends: catalog
-
   - id: ingest_lancedb
-    run: uv run podsearch-ingest --impl lancedb --lang=${LANG}
-    depends: fetch_rss
+    run: uv run podsearch-ingest --impl lancedb --lang=${LANG} --rebuild

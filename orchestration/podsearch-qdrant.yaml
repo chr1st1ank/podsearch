@@ -1,9 +1,8 @@
 name: podsearch-qdrant
-description: Podcast Index catalog -> RSS fetch -> fused Qdrant ingest+index
+description: Qdrant ingest+index based on existing data
 type: graph
 
-# dagu resolves a relative working_dir against the DAG file's dir, so `..`
-# is the repo root (env vars are NOT expanded here - steps get a scrubbed env)
+# Talk to the repo root
 working_dir: ..
 
 defaults:
@@ -12,25 +11,13 @@ defaults:
     interval_sec: 30
 
 params:
-  - name: FEEDS
-    default: "40000"
-    description: Number of feeds to fetch (podsearch-fetch-rss --feeds)
   - name: LANG
-    default: "de,en"
+    default: "de"
     # default: "de,en"  # de + en (the CLI default)
     description: Comma-separated feed languages (podsearch-fetch-rss and podsearch-ingest --lang)
 
 # catalog + fetch_rss share data/podcastindex_feeds.db and data/rss/*.parquet
-# with the sqlite pipeline (fetch is idempotent); ingest bookkeeping lives in
-# the qdrant store itself, so the pipelines stay independent.
+# with the sqlite pipeline (fetch is idempotent); 
 steps:
-  - id: catalog
-    run: uv run podsearch-catalog
-
-  - id: fetch_rss
-    run: uv run podsearch-fetch-rss --feeds ${FEEDS} --lang=${LANG}
-    depends: catalog
-
   - id: ingest_qdrant
-    run: uv run podsearch-ingest --impl qdrant --lang=${LANG}
-    depends: fetch_rss
+    run: uv run podsearch-ingest --impl qdrant --rebuild --lang=${LANG}

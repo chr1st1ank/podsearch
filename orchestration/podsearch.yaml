@@ -2,8 +2,7 @@ name: podsearch
 description: Podcast Index catalog -> RSS fetch -> corpus ingest -> embedding index
 type: graph
 
-# dagu resolves a relative working_dir against the DAG file's dir, so `..`
-# is the repo root (env vars are NOT expanded here - steps get a scrubbed env)
+# work in the repo root 
 working_dir: ..
 
 defaults:
@@ -21,12 +20,12 @@ params:
     description: Comma-separated feed languages (podsearch-fetch-rss and podsearch-ingest --lang)
 
 steps:
-  - id: catalog
-    run: uv run podsearch-catalog
+ # - id: catalog
+ #   run: uv run podsearch-catalog
 
   - id: fetch_rss
     run: uv run podsearch-fetch-rss --feeds ${FEEDS} --lang=${LANG}
-    depends: catalog
+ #   depends: catalog
 
   - id: ingest
     run: uv run podsearch-ingest --lang=${LANG}

@@ -1,0 +1,25 @@
+name: podsearch-naive
+description:  corpus ingest -> embedding index with SQLite
+type: graph
+
+# work in the repo root 
+working_dir: ..
+
+defaults:
+  retry_policy:
+    limit: 1
+    interval_sec: 30
+
+params:
+  - name: LANG
+    default: "de"
+    # default: "de,en"  # de + en (the CLI default)
+    description: Comma-separated feed languages (podsearch-fetch-rss and podsearch-ingest --lang)
+
+steps:
+  - id: ingest
+    run: uv run podsearch-ingest --lang=${LANG}
+
+  - id: index
+    run: uv run podsearch-index
+    depends: ingest
